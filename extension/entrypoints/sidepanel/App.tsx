@@ -177,7 +177,16 @@ export function App(): React.JSX.Element {
         /* opaque origin */
       }
     }
-    await messageTab({ type: 'yandz:grant-consent' });
+    // Activate the default version for this page — the top of the current feed that
+    // targets it (highest-ranked under "For you", newest under "Latest") — and mark
+    // it active, exactly as if the user had clicked that row.
+    const top = items.find((v) => v.page.urlKey === currentPageKey);
+    if (top) {
+      setSelectedId(top.id);
+      await messageTab({ type: 'yandz:apply-version', versionId: top.id });
+    } else {
+      await messageTab({ type: 'yandz:grant-consent' });
+    }
     setConsented(true);
   };
 
