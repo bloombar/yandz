@@ -125,22 +125,34 @@ describe('versions + sanitization', () => {
 });
 
 describe('voting', () => {
-  it('toggles and switches votes, updating tallies', async () => {
+  it('is sticky (re-voting is a no-op) and switches direction; reports myVote', async () => {
     const author = await makeUser('dave');
     const voter = await makeUser('erin');
     const id = await makeVersion(author.token, 'https://example.com/vote');
 
     let r = await request(app).post(`/versions/${id}/vote`).set(auth(voter.token)).send({ value: 1 });
-    expect(r.body).toMatchObject({ up: 1, down: 0 });
+    expect(r.body).toMatchObject({ up: 1, down: 0, myVote: 1 });
 
-    // Same value again toggles it off.
+    // Voting the SAME direction again does nothing (the vote is kept, not removed).
     r = await request(app).post(`/versions/${id}/vote`).set(auth(voter.token)).send({ value: 1 });
-    expect(r.body).toMatchObject({ up: 0, down: 0 });
+    expect(r.body).toMatchObject({ up: 1, down: 0, myVote: 1 });
 
-    // Switch to downvote.
-    await request(app).post(`/versions/${id}/vote`).set(auth(voter.token)).send({ value: 1 });
+    // Voting the opposite direction switches the vote.
     r = await request(app).post(`/versions/${id}/vote`).set(auth(voter.token)).send({ value: -1 });
-    expect(r.body).toMatchObject({ up: 0, down: 1 });
+    expect(r.body).toMatchObject({ up: 0, down: 1, myVote: -1 });
+  });
+
+  it('surfaces the viewer\'s existing vote in the feed (myVote)', async () => {
+    const author = await makeUser('votefeedA');
+    const voter = await makeUser('votefeedB');
+    const id = await makeVersion(author.token, 'https://example.com/votefeed');
+    await request(app).post(`/versions/${id}/vote`).set(auth(voter.token)).send({ value: 1 });
+
+    const feed = await request(app).get('/feed').query({ sort: 'latest', scope: 'all' }).set(auth(voter.token));
+    expect(feed.body.versions.find((v: any) => v.id === id).myVote).toBe(1);
+    // A different viewer sees no vote of their own.
+    const other = await request(app).get('/feed').query({ sort: 'latest', scope: 'all' }).set(auth(author.token));
+    expect(other.body.versions.find((v: any) => v.id === id).myVote).toBe(0);
   });
 });
 

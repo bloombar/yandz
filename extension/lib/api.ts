@@ -31,10 +31,12 @@ export interface VersionSummary {
   createdAt: string;
 }
 
-/** A feed/profile row: a version plus the page it modifies + the viewer's bookmark state. */
+/** A feed/profile row: a version plus the page it modifies + the viewer's bookmark/vote state. */
 export interface FeedItem extends VersionSummary {
   page: { urlKey: string; title: string };
   bookmarked: boolean;
+  /** The viewer's vote: 1 (up), -1 (down), or 0 (none). */
+  myVote: 1 | -1 | 0;
 }
 
 export interface FeedResult {
@@ -143,7 +145,7 @@ export const Api = {
     api<{ id: string }>(`/versions/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
 
   vote: (id: string, value: 1 | -1) =>
-    api<{ up: number; down: number }>(`/versions/${id}/vote`, {
+    api<{ up: number; down: number; myVote: 1 | -1 | 0 }>(`/versions/${id}/vote`, {
       method: 'POST',
       body: JSON.stringify({ value }),
     }),

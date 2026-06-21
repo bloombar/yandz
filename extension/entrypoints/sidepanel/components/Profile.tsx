@@ -45,6 +45,7 @@ export function Profile({ userId, currentPageKey, onClose, onOpenProfile, onOpen
   // Row actions (mirror the feed) operating on the local modifications list.
   const setMods = (fn: (xs: FeedItem[]) => FeedItem[]) => setData((d) => (d ? { ...d, modifications: fn(d.modifications) } : d));
   const onVote = async (v: FeedItem, value: 1 | -1) => {
+    if (v.myVote === value) return; // already voted this way — do nothing
     const tally = await Api.vote(v.id, value).catch(() => null);
     if (tally) setMods((xs) => xs.map((x) => (x.id === v.id ? { ...x, ...tally } : x)));
   };

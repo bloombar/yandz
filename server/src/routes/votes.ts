@@ -27,15 +27,16 @@ votesRouter.post('/:id/vote', requireAuth, async (req, res) => {
   const versionId = new Types.ObjectId(req.params.id);
   const userId = new Types.ObjectId(req.userId!);
 
+  // A vote is sticky: clicking your current direction does nothing (no un-vote);
+  // clicking the opposite direction switches it. Votes are never removed here.
   const existing = await Vote.findOne({ versionId, userId });
   if (!existing) {
     await Vote.create({ versionId, userId, value: parsed.data.value });
-  } else if (existing.value === parsed.data.value) {
-    await existing.deleteOne(); // toggle off
-  } else {
+  } else if (existing.value !== parsed.data.value) {
     existing.value = parsed.data.value; // switch direction
     await existing.save();
   }
+  // same value → keep as-is (no-op)
 
   const tally = await recomputeVersionScore(req.params.id);
 
@@ -46,5 +47,6 @@ votesRouter.post('/:id/vote', requireAuth, async (req, res) => {
     if (page) emitVoteUpdate(page.urlKey, { versionId: req.params.id, ...tally });
   }
 
-  res.json(tally);
+  // The viewer's resulting vote is always the value they sent (never cleared).
+  res.json({ ...tally, myVote: parsed.data.value });
 });

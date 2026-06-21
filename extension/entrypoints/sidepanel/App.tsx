@@ -142,6 +142,7 @@ export function App(): React.JSX.Element {
 
   // --- Row actions ---------------------------------------------------------
   const onVote = async (v: FeedItem, value: 1 | -1) => {
+    if (v.myVote === value) return; // already voted this way — do nothing
     const tally = await Api.vote(v.id, value).catch(() => null);
     if (tally) setItems((xs) => xs.map((x) => (x.id === v.id ? { ...x, ...tally } : x)));
   };

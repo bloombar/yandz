@@ -38,6 +38,9 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .icon-btn { display: inline-flex; align-items: center; gap: 3px; border: none; background: transparent; color: inherit; padding: 3px; border-radius: 6px; cursor: pointer; font: inherit; }
 .icon-btn:hover { background: #8881; }
 .icon-btn.active { color: #4c9ffe; }
+/* The viewer's current vote stands out (green up / red down). */
+.vote-up.active { color: #2ecc71; }
+.vote-down.active { color: #e74c3c; }
 .icon-btn .count { font-size: 11px; color: #8889; }
 /* Panel header with top-right close icon. */
 .panel-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #8883; }

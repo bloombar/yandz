@@ -93,11 +93,21 @@ export function VersionRow({
           )}
         </div>
         <span className="votes">
-          <button className="icon-btn" aria-label="downvote" onClick={() => onVote(v, -1)}>
+          <button
+            className={`icon-btn vote-down ${v.myVote === -1 ? 'active' : ''}`}
+            aria-label="downvote"
+            aria-pressed={v.myVote === -1}
+            onClick={() => onVote(v, -1)}
+          >
             <ChevronDown size={14} />
           </button>
           <strong>{v.up - v.down}</strong>
-          <button className="icon-btn" aria-label="upvote" onClick={() => onVote(v, 1)}>
+          <button
+            className={`icon-btn vote-up ${v.myVote === 1 ? 'active' : ''}`}
+            aria-label="upvote"
+            aria-pressed={v.myVote === 1}
+            onClick={() => onVote(v, 1)}
+          >
             <ChevronUp size={14} />
           </button>
         </span>

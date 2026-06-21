@@ -7,7 +7,7 @@
  * bookmark lookups so a list costs a constant number of queries.
  */
 import { Types } from 'mongoose';
-import { User, Page, Bookmark } from '../models.js';
+import { User, Page, Bookmark, Vote } from '../models.js';
 
 /** Minimal shape we need off a lean Version doc. */
 export interface RawVersion {
@@ -38,6 +38,8 @@ export interface SerializedVersion {
   wilsonScore: number;
   commentCount: number;
   bookmarked: boolean;
+  /** The viewer's vote on this version: 1 (up), -1 (down), or 0 (none). */
+  myVote: 1 | -1 | 0;
   createdAt: Date | undefined;
 }
 
@@ -54,20 +56,22 @@ export async function serializeVersions(
   const authorIds = [...new Set(versions.map((v) => String(v.authorId)))];
   const pageIds = [...new Set(versions.map((v) => String(v.pageId)))];
 
-  const [authors, pages, bookmarks] = await Promise.all([
+  const versionIds = versions.map((v) => v._id);
+  const [authors, pages, bookmarks, votes] = await Promise.all([
     User.find({ _id: { $in: authorIds } }).select('handle').lean(),
     Page.find({ _id: { $in: pageIds } }).select('urlKey title').lean(),
     viewerId
-      ? Bookmark.find({
-          userId: new Types.ObjectId(viewerId),
-          versionId: { $in: versions.map((v) => v._id) },
-        }).lean()
+      ? Bookmark.find({ userId: new Types.ObjectId(viewerId), versionId: { $in: versionIds } }).lean()
+      : Promise.resolve([]),
+    viewerId
+      ? Vote.find({ userId: new Types.ObjectId(viewerId), versionId: { $in: versionIds } }).lean()
       : Promise.resolve([]),
   ]);
 
   const handleById = new Map(authors.map((a) => [String(a._id), a.handle]));
   const pageById = new Map(pages.map((p) => [String(p._id), { urlKey: p.urlKey, title: p.title }]));
   const bookmarked = new Set(bookmarks.map((b) => String(b.versionId)));
+  const voteByVersion = new Map(votes.map((vt) => [String(vt.versionId), vt.value as 1 | -1]));
 
   return versions.map((v) => ({
     id: String(v._id),
@@ -82,6 +86,7 @@ export async function serializeVersions(
     wilsonScore: v.wilsonScore,
     commentCount: v.commentCount,
     bookmarked: bookmarked.has(String(v._id)),
+    myVote: voteByVersion.get(String(v._id)) ?? 0,
     createdAt: v.createdAt,
   }));
 }
