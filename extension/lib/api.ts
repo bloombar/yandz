@@ -13,6 +13,11 @@ export interface PublicUser {
   handle: string;
 }
 
+export interface PageVersions {
+  page: { urlKey: string; versionCount: number };
+  versions: VersionSummary[];
+}
+
 export interface VersionSummary {
   id: string;
   name: string;
@@ -91,9 +96,7 @@ export const Api = {
     }),
 
   getVersionsForUrl: (url: string, sort: 'foryou' | 'latest' = 'foryou') =>
-    api<{ page: { urlKey: string; versionCount: number }; versions: VersionSummary[] }>(
-      `/pages?url=${encodeURIComponent(url)}&sort=${sort}`,
-    ),
+    api<PageVersions>(`/pages?url=${encodeURIComponent(url)}&sort=${sort}`),
 
   createVersion: (input: { url: string; title?: string; name?: string; patches: AnyPatch[] }) =>
     api<{ id: string }>('/versions', { method: 'POST', body: JSON.stringify(input) }),

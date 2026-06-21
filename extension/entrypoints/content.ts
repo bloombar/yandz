@@ -16,7 +16,16 @@
  */
 import { defineContentScript } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
-import { Api, type VersionSummary } from '../lib/api.js';
+import type { PageVersions, VersionSummary } from '../lib/api.js';
+
+/**
+ * Fetch page versions via the background SW. A direct fetch from the content
+ * script (page origin) to the loopback backend is blocked by Chrome's Private
+ * Network Access; the background (extension context) can reach localhost.
+ */
+async function getVersions(url: string): Promise<PageVersions | null> {
+  return (await browser.runtime.sendMessage({ type: 'yandz:get-versions', url })) as PageVersions | null;
+}
 import { PatchEngine } from '../lib/engine/applier.js';
 import { fingerprintElement } from '../lib/engine/fingerprint.js';
 import { mountFloatingIcon } from '../lib/ui/floating-icon.js';
@@ -83,7 +92,7 @@ export default defineContentScript({
     ctx.onInvalidated(() => observer.disconnect());
 
     // Holds the fetched versions once loaded (null until then / on failure).
-    let data: Awaited<ReturnType<typeof Api.getVersionsForUrl>> | null = null;
+    let data: PageVersions | null = null;
 
     // Messages from the side panel: switch version, revert, grant consent, pick, draw.
     browser.runtime.onMessage.addListener((msg: any) => {
@@ -94,8 +103,9 @@ export default defineContentScript({
             applyVersion(found);
           } else {
             // A just-created version won't be in our cached list — re-fetch, then apply.
-            void Api.getVersionsForUrl(location.href)
+            void getVersions(location.href)
               .then((fresh) => {
+                if (!fresh) return;
                 data = fresh;
                 const v = fresh.versions.find((x) => x.id === msg.versionId);
                 if (v) applyVersion(v);
@@ -155,7 +165,7 @@ export default defineContentScript({
     // Fetch existing versions (best-effort; a failure or empty result just means
     // no floating icon / nothing to auto-apply — editing still works via the panel).
     try {
-      data = await Api.getVersionsForUrl(location.href);
+      data = await getVersions(location.href);
     } catch {
       return; // backend unreachable
     }

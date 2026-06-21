@@ -11,6 +11,7 @@ import { defineBackground } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
 import { configurePanelBehavior, openPanel } from '../lib/browser-surface.js';
 import { registerPush } from '../lib/push.js';
+import { Api } from '../lib/api.js';
 
 interface PushData {
   title: string;
@@ -30,13 +31,20 @@ export default defineBackground(() => {
 
   // The content-script floating icon posts this to toggle the panel.
   browser.runtime.onMessage.addListener((msg: unknown, sender: { tab?: { windowId?: number } }) => {
-    const type = (msg as { type?: string })?.type;
-    if (type === 'yandz:open-panel') {
+    const m = msg as { type?: string; url?: string };
+    if (m?.type === 'yandz:open-panel') {
       void openPanel(sender.tab?.windowId);
-    } else if (type === 'yandz:register-push') {
+    } else if (m?.type === 'yandz:register-push') {
       // Panel fires this after sign-in; subscribe the SW to push and register it.
       void registerPush();
+    } else if (m?.type === 'yandz:get-versions' && m.url) {
+      // Proxy the page-versions fetch for content scripts: a content script runs in
+      // the page's origin and Chrome's Private Network Access blocks it from reaching
+      // a loopback backend (localhost). The background runs in the extension context
+      // and can. Returning a Promise responds to the sender.
+      return Api.getVersionsForUrl(m.url).catch(() => null);
     }
+    return undefined;
   });
 
   // Web Push delivery (Chromium): wake → show a notification. The SW push event
