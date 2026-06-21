@@ -2,8 +2,13 @@
 * { box-sizing: border-box; }
 body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .app { display: flex; flex-direction: column; height: 100vh; }
-.header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #8883; }
-.header h1 { font-size: 14px; margin: 0; flex: 1; }
+/* Title (left) · edit-tools (centered) · settings (right). The equal 1fr side
+   columns center the auto-width middle cluster within the header. */
+.header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #8883; }
+.header h1 { font-size: 14px; margin: 0; }
+.header > .icon-btn { justify-self: end; } /* the settings button (only direct icon-btn) */
+.edit-tools { display: inline-flex; align-items: center; gap: 4px; border: 1px solid #8884; border-radius: 8px; padding: 2px 8px; }
+.edit-tools-label { font-size: 12px; color: #8889; margin-right: 2px; white-space: nowrap; }
 /* Tabs: underline-style, not buttons. */
 .tabs { display: flex; gap: 16px; padding: 6px 12px 0; border-bottom: 1px solid #8883; }
 .tab { border: none; background: transparent; padding: 6px 2px; cursor: pointer; font: inherit; color: #8889; border-bottom: 2px solid transparent; margin-bottom: -1px; }

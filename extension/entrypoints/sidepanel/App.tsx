@@ -205,12 +205,16 @@ export function App(): React.JSX.Element {
     <div className="app">
       <header className="header">
         <h1>Y and Z</h1>
-        <button className="icon-btn" aria-label="Select an element to edit" title="Select an element" onClick={() => startTool('pick')}>
-          <MousePointerClick size={16} />
-        </button>
-        <button className="icon-btn" aria-label="Draw on the page" title="Draw" onClick={() => startTool('draw')}>
-          <Pencil size={16} />
-        </button>
+        {/* Centered, bordered, labeled cluster of page-editing tools. */}
+        <div className="edit-tools">
+          <span className="edit-tools-label">Edit this page:</span>
+          <button className="icon-btn" aria-label="Select an element to edit" title="Select an element" onClick={() => startTool('pick')}>
+            <MousePointerClick size={16} />
+          </button>
+          <button className="icon-btn" aria-label="Draw on the page" title="Draw" onClick={() => startTool('draw')}>
+            <Pencil size={16} />
+          </button>
+        </div>
         <button className="icon-btn" aria-label="Settings" title="Settings" onClick={() => push({ name: 'settings' })}>
           <SettingsIcon size={16} />
         </button>
