@@ -127,6 +127,7 @@ dist
 
 # WXT build/generated dirs and Playwright artifacts
 .output/
+extension/output/
 .wxt/
 playwright-report/
 test-results/

@@ -86,10 +86,10 @@ npm run dev:ext:firefox           # WXT dev build (Firefox)
 Then load the unpacked extension:
 
 - **Chromium (Chrome/Brave/Edge):** `chrome://extensions` → enable *Developer mode* →
-  **Load unpacked** → select `extension/.output/chrome-mv3` (dev build:
+  **Load unpacked** → select `extension/output/chrome-mv3` (dev build:
   `chrome-mv3-dev`).
 - **Firefox:** `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** →
-  pick `extension/.output/firefox-mv2/manifest.json` (or use `web-ext run`).
+  pick `extension/output/firefox-mv2/manifest.json` (or use `web-ext run`).
 
 Dev resources are isolated from anything else sharing your local servers:
 **Mongo database** `yandz_dev`, **MinIO bucket** `yandz-assets`.

@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const EXT_PATH = path.resolve(__dirname, '../../extension/.output/chrome-mv3');
+const EXT_PATH = path.resolve(__dirname, '../../extension/output/chrome-mv3');
 const FIXTURE = `file://${path.resolve(__dirname, '../fixtures/sample-page.html')}`;
 
 /** Launch a persistent Chromium context with the extension loaded. */

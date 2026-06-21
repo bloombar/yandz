@@ -10,6 +10,9 @@ import { defineConfig } from 'wxt';
  */
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
+  // Use a VISIBLE output dir (not the default ".output") so the build folder shows
+  // up in Chrome's "Load unpacked" file picker, which hides dot-directories.
+  outDir: 'output',
   manifest: ({ browser }) => ({
     name: 'Y and Z',
     description: 'Collaboratively remix any web page — modify, share, fork, vote, discuss.',
