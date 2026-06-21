@@ -84,6 +84,23 @@ export function App(): React.JSX.Element {
     if (authed) void refresh();
   }, [authed, refresh]);
 
+  // Re-fetch the list whenever the user switches tabs or the active tab finishes
+  // navigating — otherwise the panel stays stuck on whatever it loaded at mount
+  // (e.g. an empty result from a blank tab after a restart).
+  useEffect(() => {
+    if (!authed) return;
+    const onActivated = () => void refresh();
+    const onUpdated = (_id: number, info: { status?: string }, tab: { active?: boolean }) => {
+      if (info.status === 'complete' && tab.active) void refresh();
+    };
+    browser.tabs.onActivated.addListener(onActivated);
+    browser.tabs.onUpdated.addListener(onUpdated);
+    return () => {
+      browser.tabs.onActivated.removeListener(onActivated);
+      browser.tabs.onUpdated.removeListener(onUpdated);
+    };
+  }, [authed, refresh]);
+
   const onAuthed = (_user: PublicUser, token: string) => {
     void setToken(token).then(() => {
       setAuthed(true);
