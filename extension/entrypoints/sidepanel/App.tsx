@@ -45,10 +45,21 @@ export function App(): React.JSX.Element {
   // Surfaces why the list is empty (fetch error) instead of silently blanking.
   const [listError, setListError] = useState<string | null>(null);
 
-  /** Send a message to the content script in the active tab. */
-  const messageTab = useCallback(async (payload: unknown) => {
+  /**
+   * Send a message to the content script in the active tab. Returns false if the
+   * content script isn't reachable (e.g. the page was open before the extension
+   * (re)loaded and needs a refresh, or it's a chrome:// / store page where content
+   * scripts can't run) so callers can show actionable guidance.
+   */
+  const messageTab = useCallback(async (payload: unknown): Promise<boolean> => {
     const { id } = await getActiveTab();
-    if (id !== undefined) await browser.tabs.sendMessage(id, payload).catch(() => {});
+    if (id === undefined) return false;
+    try {
+      await browser.tabs.sendMessage(id, payload);
+      return true;
+    } catch {
+      return false;
+    }
   }, []);
 
   useEffect(() => {

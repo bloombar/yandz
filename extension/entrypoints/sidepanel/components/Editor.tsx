@@ -36,7 +36,8 @@ type EditorMessage = PickedMessage | DrawMessage | TextEditedMessage;
 interface Props {
   url: string;
   baseVersionId?: string;
-  messageTab: (payload: unknown) => void;
+  /** Returns false when the content script isn't reachable on the active tab. */
+  messageTab: (payload: unknown) => Promise<boolean>;
   /** Called with the new version's id after a successful save. */
   onSaved: (newVersionId: string) => void;
   onClose: () => void;
@@ -48,6 +49,18 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
   const [name, setName] = useState('');
   const [status, setStatus] = useState<SaveStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
+
+  /** Trigger a page-side tool (pick/draw), surfacing guidance if unreachable. */
+  const runTool = async (payload: unknown) => {
+    setHint(null);
+    const ok = await messageTab(payload);
+    if (!ok) {
+      setHint(
+        'Can’t reach this page. Reload the tab and try again. (Pages like chrome:// or the Web Store can’t be edited.)',
+      );
+    }
+  };
 
   // Refs so the debounced save reads the latest values and persists to ONE version
   // for the whole editing session (create once, then update).
@@ -154,13 +167,14 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
       </div>
 
       <div className="row" style={{ gap: 6, marginBottom: 8 }}>
-        <button className="btn primary" onClick={() => messageTab({ type: 'yandz:start-picker' })}>
+        <button className="btn primary" onClick={() => void runTool({ type: 'yandz:start-picker' })}>
           Pick element
         </button>
-        <button className="btn" onClick={() => messageTab({ type: 'yandz:start-draw', color: '#e11' })}>
+        <button className="btn" onClick={() => void runTool({ type: 'yandz:start-draw', color: '#e11' })}>
           Draw
         </button>
       </div>
+      {hint && <div className="error">{hint}</div>}
 
       {picked && <PickedEditor picked={picked} onAdd={addPatch} onSwapImage={swapImage} />}
 
