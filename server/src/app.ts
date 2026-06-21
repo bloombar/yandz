@@ -21,7 +21,10 @@ import { pushRouter } from './routes/push.js';
 
 export function createApp(): Express {
   const app = express();
-  app.use(cors({ origin: config.corsOrigins }));
+  // `origin: ['*']` would be treated as a literal origin by the cors package (and
+  // never match), so map a '*' entry to `true`, which reflects any request origin.
+  const corsOrigin = config.corsOrigins.includes('*') ? true : config.corsOrigins;
+  app.use(cors({ origin: corsOrigin }));
   app.use(express.json({ limit: '2mb' })); // patch sets can be a few hundred KB
 
   // Basic abuse mitigation: cap write-heavy traffic per IP.

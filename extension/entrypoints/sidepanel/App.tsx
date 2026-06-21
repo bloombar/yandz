@@ -42,6 +42,8 @@ export function App(): React.JSX.Element {
   const [consented, setConsented] = useState(true);
   // The version to highlight as selected in the list (e.g. just after saving).
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Surfaces why the list is empty (fetch error) instead of silently blanking.
+  const [listError, setListError] = useState<string | null>(null);
 
   /** Send a message to the content script in the active tab. */
   const messageTab = useCallback(async (payload: unknown) => {
@@ -50,7 +52,11 @@ export function App(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    void getToken().then((t) => setAuthed(!!t));
+    // Always resolve auth state — never leave the panel stuck on the blank
+    // (authed === null) screen if storage access throws.
+    void getToken()
+      .then((t) => setAuthed(!!t))
+      .catch(() => setAuthed(false));
   }, []);
 
   // Tracks the last URL we loaded, so a tab/page change clears the applied-version
@@ -64,12 +70,18 @@ export function App(): React.JSX.Element {
       setSelectedId(null);
     }
     setUrl(tab.url);
-    if (!tab.url) return;
+    if (!tab.url) {
+      setVersions([]);
+      setListError(null);
+      return;
+    }
     try {
       const data = await Api.getVersionsForUrl(tab.url, sort);
       setVersions(data.versions);
-    } catch {
+      setListError(null);
+    } catch (err) {
       setVersions([]);
+      setListError((err as Error).message || 'Could not reach the server');
     }
     try {
       const origin = new URL(tab.url).origin;
@@ -205,7 +217,14 @@ export function App(): React.JSX.Element {
               onOpenProfile={(userId) => setView({ name: 'profile', userId })}
               onOpenComments={(v) => setView({ name: 'comments', versionId: v.id })}
             />
-            {versions.length === 0 && <p className="muted">No modifications yet for this page.</p>}
+            {versions.length === 0 &&
+              (listError ? (
+                <p className="error">Couldn’t load modifications: {listError}</p>
+              ) : (
+                <p className="muted">
+                  No modifications yet for {url ? new URL(url).host : 'this page'}.
+                </p>
+              ))}
           </div>
         </>
       )}
