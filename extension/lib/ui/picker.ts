@@ -20,7 +20,7 @@ const OVERLAY_ID = 'yandz-picker-overlay';
 const TEXT_ATTRS = ['alt', 'title', 'aria-label', 'placeholder', 'value'];
 
 /** True if the element has a direct (non-whitespace) text node of its own. */
-function hasOwnText(el: Element): boolean {
+export function hasOwnText(el: Element): boolean {
   for (const node of Array.from(el.childNodes)) {
     if (node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '') return true;
   }

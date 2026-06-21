@@ -20,9 +20,10 @@ import { Api, type VersionSummary } from '../lib/api.js';
 import { PatchEngine } from '../lib/engine/applier.js';
 import { fingerprintElement } from '../lib/engine/fingerprint.js';
 import { mountFloatingIcon } from '../lib/ui/floating-icon.js';
-import { startPicker } from '../lib/ui/picker.js';
+import { startPicker, hasOwnText } from '../lib/ui/picker.js';
 import { OverlayRenderer } from '../lib/ui/overlay-renderer.js';
 import { startDrawing } from '../lib/ui/draw-capture.js';
+import { startInlineEdit, isInlineEditing } from '../lib/ui/inline-edit.js';
 
 /** Capture the editable state of a picked element so the panel can prefill an editor. */
 function elementSnapshot(el: Element): Record<string, unknown> {
@@ -72,7 +73,8 @@ export default defineContentScript({
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
-        if (current) engine.apply(current.patches);
+        // Don't fight the user's in-place typing by re-applying patches over it.
+        if (current && !isInlineEditing()) engine.apply(current.patches);
       });
     });
     if (document.documentElement) {
@@ -110,14 +112,27 @@ export default defineContentScript({
           if (data?.versions[0]) applyVersion(data.versions[0]);
           break;
         case 'yandz:start-picker':
-          // Open the inspector; on selection, return the element's fingerprint and a
-          // snapshot so the panel can open the right editor prefilled.
+          // Open the inspector. If the picked element has its own text, edit it
+          // IN PLACE on the page and send the resulting textReplace patch. For
+          // textless elements, fall back to the sidebar editor (CSS/attr/image).
           startPicker((el) => {
-            void browser.runtime.sendMessage({
-              type: 'yandz:element-picked',
-              target: fingerprintElement(el),
-              snapshot: elementSnapshot(el),
-            });
+            if (hasOwnText(el)) {
+              startInlineEdit(el, {
+                onCommit: ({ from, to }) => {
+                  void browser.runtime.sendMessage({
+                    type: 'yandz:text-edited',
+                    target: fingerprintElement(el),
+                    payload: { from, to },
+                  });
+                },
+              });
+            } else {
+              void browser.runtime.sendMessage({
+                type: 'yandz:element-picked',
+                target: fingerprintElement(el),
+                snapshot: elementSnapshot(el),
+              });
+            }
           });
           break;
         case 'yandz:start-draw':

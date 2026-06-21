@@ -22,6 +22,12 @@ interface DrawMessage {
   target: ElementTarget;
   strokes: DrawingStroke[];
 }
+interface TextEditedMessage {
+  type: 'yandz:text-edited';
+  target: ElementTarget;
+  payload: { from: string; to: string };
+}
+type EditorMessage = PickedMessage | DrawMessage | TextEditedMessage;
 
 interface Props {
   url: string;
@@ -42,10 +48,13 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
   const addPatch = (p: Omit<AnyPatch, 'order'>) =>
     setPatches((prev) => [...prev, { ...p, order: prev.length } as AnyPatch]);
 
-  // Receive picks and drawings from the content script.
+  // Receive picks, in-place text edits, and drawings from the content script.
   useEffect(() => {
-    const listener = (msg: PickedMessage | DrawMessage) => {
+    const listener = (msg: EditorMessage) => {
       if (msg?.type === 'yandz:element-picked') setPicked(msg);
+      else if (msg?.type === 'yandz:text-edited')
+        // In-place edit already changed the page; stage the matching textReplace.
+        addPatch({ op: 'textReplace', target: msg.target, payload: msg.payload });
       else if (msg?.type === 'yandz:drawing-captured')
         addPatch({ op: 'drawingOverlay', target: msg.target, payload: { strokes: msg.strokes } });
     };
