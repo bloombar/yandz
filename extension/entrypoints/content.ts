@@ -77,9 +77,17 @@ export default defineContentScript({
       onClick: () => browser.runtime.sendMessage({ type: 'yandz:open-panel' }),
     });
 
-    // Auto-apply only after one-time consent; otherwise wait for the panel's
-    // consent action (which sets the storage flag and messages us back).
-    if (await hasConsent()) {
+    // A "pending apply" flag (set when a profile card is clicked) takes priority:
+    // apply that exact version once, regardless of consent, then clear the flag.
+    const pendingKey = `pendingApply:${data.page.urlKey}`;
+    const pendingId = (await browser.storage.local.get(pendingKey))[pendingKey] as string | undefined;
+    if (pendingId) {
+      await browser.storage.local.remove(pendingKey);
+      const requested = data.versions.find((v) => v.id === pendingId);
+      if (requested) applyVersion(requested);
+      else if (await hasConsent()) applyVersion(topVersion);
+    } else if (await hasConsent()) {
+      // Otherwise auto-apply the top version only after one-time per-site consent.
       applyVersion(topVersion);
     }
 

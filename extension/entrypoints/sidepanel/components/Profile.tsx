@@ -4,7 +4,20 @@
  * corresponding API and optimistically updates the button state.
  */
 import React, { useEffect, useState } from 'react';
+import { ExternalLink } from 'lucide-react';
+import { browser } from 'wxt/browser';
 import { Api } from '../../../lib/api.js';
+
+/**
+ * Open a page in a new tab with a specific version queued to auto-apply. We stash
+ * the target versionId under a per-urlKey storage flag; the content script reads
+ * and clears it on load (see entrypoints/content.ts), applying that version even
+ * without prior consent — the click is an explicit request to view this mod.
+ */
+async function openWithVersion(urlKey: string, versionId: string): Promise<void> {
+  await browser.storage.local.set({ [`pendingApply:${urlKey}`]: versionId });
+  await browser.tabs.create({ url: urlKey });
+}
 
 interface ProfileData {
   user: { id: string; handle: string };
@@ -46,8 +59,16 @@ export function Profile({ userId, onClose }: { userId: string; onClose: () => vo
       </div>
       <h3 className="muted">Modifications</h3>
       {data.modifications.map((m) => (
-        <div className="card" key={m.versionId}>
-          <div>{m.name}</div>
+        <div
+          className="card card-link"
+          key={m.versionId}
+          role="button"
+          title="Open this page with this modification applied"
+          onClick={() => openWithVersion(m.urlKey, m.versionId)}
+        >
+          <div className="version-title">
+            {m.name} <ExternalLink size={11} style={{ verticalAlign: 'middle' }} />
+          </div>
           <div className="muted">
             {m.urlKey} · {new Date(m.createdAt).toLocaleDateString()}
           </div>

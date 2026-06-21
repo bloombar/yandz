@@ -88,6 +88,18 @@ export function App(): React.JSX.Element {
   };
 
   const grantConsent = async () => {
+    // Persist consent from the panel itself (not only via the content script,
+    // which may have bailed out early if the backend was unreachable on load),
+    // so it survives sort/tab switches and future page loads.
+    const tab = await getActiveTab();
+    if (tab.url) {
+      try {
+        const origin = new URL(tab.url).origin;
+        await browser.storage.local.set({ [`consent:${origin}`]: true });
+      } catch {
+        /* opaque origin (e.g. file://) — skip persistence */
+      }
+    }
     await messageTab({ type: 'yandz:grant-consent' });
     setConsented(true);
   };
@@ -118,6 +130,17 @@ export function App(): React.JSX.Element {
 
       {view.name === 'versions' && (
         <>
+          {/* Page-level consent prompt — shown once above the tabs (not per tab). */}
+          {!consented && versions.length > 0 && (
+            <div className="banner">
+              Other users have modified this page. Apply the top version on this site?
+              <div style={{ marginTop: 6 }}>
+                <button className="btn primary" onClick={grantConsent}>
+                  Apply &amp; remember for {url ? new URL(url).host : 'this site'}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="tabs" role="tablist">
             {(['hot', 'top', 'new'] as const).map((s) => (
               <button key={s} className="tab" role="tab" aria-selected={sort === s} onClick={() => setSort(s)}>
@@ -126,16 +149,6 @@ export function App(): React.JSX.Element {
             ))}
           </div>
           <div className="list">
-            {!consented && versions.length > 0 && (
-              <div className="banner">
-                Other users have modified this page. Apply the top version on this site?
-                <div style={{ marginTop: 6 }}>
-                  <button className="btn primary" onClick={grantConsent}>
-                    Apply &amp; remember for {url ? new URL(url).host : 'this site'}
-                  </button>
-                </div>
-              </div>
-            )}
             <VersionList
               versions={versions}
               onVote={onVote}

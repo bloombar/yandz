@@ -10,13 +10,19 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .list { flex: 1; overflow: auto; padding: 8px 12px; }
 .card { border: 1px solid #8883; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
 .card .row { display: flex; align-items: center; gap: 8px; }
+.card-link { cursor: pointer; }
+.card-link:hover { border-color: #4c9ffe; background: #4c9ffe11; }
 .handle { color: #4c9ffe; cursor: pointer; }
 .muted { color: #8889; }
 .votes { display: flex; align-items: center; gap: 4px; }
+.votes-right { flex-direction: column; gap: 2px; margin-left: 8px; }
+.version-title { font-weight: 600; color: #4c9ffe; cursor: pointer; }
+.version-title:hover { text-decoration: underline; }
+.version-title[aria-pressed="true"] { color: #2ecc71; }
 .btn { border: 1px solid #8884; background: transparent; border-radius: 6px; padding: 3px 8px; cursor: pointer; font: inherit; }
 .btn:hover { background: #8881; }
 .btn.primary { background: #4c9ffe; color: #fff; border-color: transparent; }
-.banner { background: #ffd86655; border: 1px solid #ffd866; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+.banner { background: #ffd86655; border: 1px solid #ffd866; border-radius: 8px; padding: 10px; margin: 8px 12px 0; }
 .form { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
 .form input { padding: 6px 8px; border: 1px solid #8884; border-radius: 6px; font: inherit; }
 .error { color: #e11; }
