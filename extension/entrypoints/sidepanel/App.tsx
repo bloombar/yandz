@@ -29,7 +29,7 @@ import { Settings } from './components/Settings.js';
 type View =
   | { name: 'feed' }
   | { name: 'profile'; userId: string }
-  | { name: 'comments'; versionId: string }
+  | { name: 'comments'; version: FeedItem }
   | { name: 'editor'; baseVersionId?: string; initialTool?: 'pick' | 'draw' }
   | { name: 'settings' };
 
@@ -284,7 +284,7 @@ export function App(): React.JSX.Element {
                 onApply={onApply}
                 onVote={onVote}
                 onOpenProfile={(userId) => push({ name: 'profile', userId })}
-                onOpenComments={(x) => push({ name: 'comments', versionId: x.id })}
+                onOpenComments={(x) => push({ name: 'comments', version: x })}
                 onToggleBookmark={onToggleBookmark}
                 onShare={onShare}
               />
@@ -301,8 +301,8 @@ export function App(): React.JSX.Element {
         </>
       )}
 
-      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(id) => push({ name: 'comments', versionId: id })} currentPageKey={currentPageKey} />}
-      {view.name === 'comments' && <Comments versionId={view.versionId} onClose={close} />}
+      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(v) => push({ name: 'comments', version: v })} currentPageKey={currentPageKey} />}
+      {view.name === 'comments' && <Comments version={view.version} onClose={close} />}
       {view.name === 'settings' && (
         <Settings onOpenProfile={(userId) => push({ name: 'profile', userId })} onClose={close} />
       )}

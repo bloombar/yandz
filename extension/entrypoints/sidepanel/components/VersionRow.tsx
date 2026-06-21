@@ -43,7 +43,8 @@ export function VersionRow({
 }: Props): React.JSX.Element {
   return (
     <div className="version-row">
-      <div className="version-row-main">
+      {/* Top line: title (apply) + comment / bookmark / share icons. */}
+      <div className="vr-line">
         <div
           className="version-title"
           role="button"
@@ -53,10 +54,32 @@ export function VersionRow({
         >
           {active && <Check size={12} style={{ verticalAlign: 'middle' }} />} {v.name}
         </div>
-        {/* The page each version modifies — always shown for global-feed context. */}
-        <div className="muted page-ref" title={v.page.urlKey}>
-          {v.page.title || 'Untitled page'} · {shortUrl(v.page.urlKey)}
+        <div className="row-actions">
+          <button className="icon-btn" title="Comments" onClick={() => onOpenComments(v)}>
+            <MessageSquare size={14} />
+            <span className="count">{v.commentCount}</span>
+          </button>
+          <button
+            className={`icon-btn ${v.bookmarked ? 'active' : ''}`}
+            title={v.bookmarked ? 'Remove bookmark' : 'Bookmark'}
+            onClick={() => onToggleBookmark(v)}
+          >
+            <Bookmark size={14} fill={v.bookmarked ? 'currentColor' : 'none'} />
+          </button>
+          <button className="icon-btn" title="Share" onClick={() => onShare(v)}>
+            <Share2 size={14} />
+          </button>
         </div>
+      </div>
+
+      {/* The page each version modifies — always shown for global-feed context. */}
+      <div className="muted page-ref" title={v.page.urlKey}>
+        {v.page.title || 'Untitled page'} · {shortUrl(v.page.urlKey)}
+      </div>
+
+      {/* Bottom line: author/date (left) + votes (down · net · up), right-aligned
+          under the action icons. */}
+      <div className="vr-line">
         <div className="muted">
           <span className="handle" onClick={() => onOpenProfile(v.author.id)}>
             u/{v.author.handle}
@@ -69,30 +92,13 @@ export function VersionRow({
             </>
           )}
         </div>
-      </div>
-
-      <div className="row-actions">
-        <button className="icon-btn" title="Comments" onClick={() => onOpenComments(v)}>
-          <MessageSquare size={14} />
-          <span className="count">{v.commentCount}</span>
-        </button>
-        <button
-          className={`icon-btn ${v.bookmarked ? 'active' : ''}`}
-          title={v.bookmarked ? 'Remove bookmark' : 'Bookmark'}
-          onClick={() => onToggleBookmark(v)}
-        >
-          <Bookmark size={14} fill={v.bookmarked ? 'currentColor' : 'none'} />
-        </button>
-        <button className="icon-btn" title="Share" onClick={() => onShare(v)}>
-          <Share2 size={14} />
-        </button>
         <span className="votes">
-          <button className="icon-btn" aria-label="upvote" onClick={() => onVote(v, 1)}>
-            <ChevronUp size={14} />
-          </button>
-          <strong>{v.up - v.down}</strong>
           <button className="icon-btn" aria-label="downvote" onClick={() => onVote(v, -1)}>
             <ChevronDown size={14} />
+          </button>
+          <strong>{v.up - v.down}</strong>
+          <button className="icon-btn" aria-label="upvote" onClick={() => onVote(v, 1)}>
+            <ChevronUp size={14} />
           </button>
         </span>
       </div>

@@ -21,7 +21,7 @@ interface Props {
   currentPageKey: string | null;
   onClose: () => void;
   onOpenProfile: (userId: string) => void;
-  onOpenComments: (versionId: string) => void;
+  onOpenComments: (version: FeedItem) => void;
 }
 
 export function Profile({ userId, currentPageKey, onClose, onOpenProfile, onOpenComments }: Props): React.JSX.Element {
@@ -95,7 +95,7 @@ export function Profile({ userId, currentPageKey, onClose, onOpenProfile, onOpen
           onApply={(x) => void applyVersionAnywhere(x.id, x.page.urlKey, currentPageKey)}
           onVote={onVote}
           onOpenProfile={onOpenProfile}
-          onOpenComments={(x) => onOpenComments(x.id)}
+          onOpenComments={(x) => onOpenComments(x)}
           onToggleBookmark={onToggleBookmark}
           onShare={(x) => void shareVersion(x.page.urlKey, x.id, x.name)}
         />

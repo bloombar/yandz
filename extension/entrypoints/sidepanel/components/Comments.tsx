@@ -5,12 +5,13 @@
  * from each comment's parentCommentId.
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { Api } from '../../../lib/api.js';
+import { Api, type FeedItem } from '../../../lib/api.js';
 import { subscribeToVersionComments, type LiveComment } from '../../../lib/realtime.js';
 import { PanelHeader } from './PanelHeader.js';
 
 interface Props {
-  versionId: string;
+  /** The version the discussion is about — drives the context header. */
+  version: FeedItem;
   onClose: () => void;
 }
 
@@ -26,7 +27,8 @@ function buildTree(comments: LiveComment[]): Map<string | null, LiveComment[]> {
   return byParent;
 }
 
-export function Comments({ versionId, onClose }: Props): React.JSX.Element {
+export function Comments({ version, onClose }: Props): React.JSX.Element {
+  const versionId = version.id;
   const [comments, setComments] = useState<LiveComment[]>([]);
   const [draft, setDraft] = useState('');
   const [replyTo, setReplyTo] = useState<string | null>(null);
@@ -75,6 +77,17 @@ export function Comments({ versionId, onClose }: Props): React.JSX.Element {
   return (
     <div className="list">
       <PanelHeader title="Discussion" onClose={onClose} />
+
+      {/* Context: which version of which page this discussion is about. */}
+      <div className="comment-context">
+        <div className="version-title-static">{version.name}</div>
+        <div className="muted page-ref" title={version.page.urlKey}>
+          {version.page.title || 'Untitled page'} · {version.page.urlKey.replace(/^https?:\/\//, '')}
+        </div>
+        <div className="muted">
+          u/{version.author.handle} · {new Date(version.createdAt).toLocaleString()}
+        </div>
+      </div>
 
       {(tree.get(null) ?? []).map((c) => renderNode(c, 0))}
       {comments.length === 0 && <p className="muted">No comments yet. Start the discussion.</p>}

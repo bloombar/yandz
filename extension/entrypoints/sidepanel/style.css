@@ -26,13 +26,14 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .version-title:hover { text-decoration: underline; }
 .version-title[aria-pressed="true"] { color: #2ecc71; }
 
-/* Compact, row-like feed item: bottom border only, no card chrome. */
-.version-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #8883; }
-.version-row-main { flex: 1; min-width: 0; }
-.version-row-main > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.page-ref { font-size: 11px; }
+/* Compact, row-like feed item: bottom border only, no card chrome. Stacked lines:
+   [title ........ actions] / page-ref / [author/date ........ votes]. */
+.version-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-bottom: 1px solid #8883; }
+.vr-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vr-line > .version-title, .vr-line > .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.page-ref { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.votes { display: flex; align-items: center; gap: 2px; }
+.votes { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 /* Icon buttons (nav tools, row actions, close, kebab). */
 .icon-btn { display: inline-flex; align-items: center; gap: 3px; border: none; background: transparent; color: inherit; padding: 3px; border-radius: 6px; cursor: pointer; font: inherit; }
 .icon-btn:hover { background: #8881; }
@@ -52,6 +53,9 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .banner { background: #ffd86655; border: 1px solid #ffd866; border-radius: 8px; padding: 10px; margin: 8px 12px 0; }
 .form { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
 .form input { padding: 6px 8px; border: 1px solid #8884; border-radius: 6px; font: inherit; }
+/* Discussion context (which version of which page the comments are about). */
+.comment-context { padding: 8px 12px; border-bottom: 1px solid #8883; margin-bottom: 8px; }
+.version-title-static { font-weight: 600; }
 .error { color: #e11; }
 .save-status { font-size: 11px; font-style: italic; }
 .diff-add { background: #2ecc7133; }
