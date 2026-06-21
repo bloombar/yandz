@@ -124,6 +124,29 @@ describe('versions + sanitization', () => {
   });
 });
 
+describe('delete version', () => {
+  it('lets the author delete (cascading votes/comments) and forbids others', async () => {
+    const author = await makeUser('delauthor');
+    const other = await makeUser('delother');
+    const url = 'https://example.com/del';
+    const id = await makeVersion(author.token, url, 'doomed');
+    await request(app).post(`/versions/${id}/vote`).set(auth(other.token)).send({ value: 1 });
+    await request(app).post(`/versions/${id}/comments`).set(auth(other.token)).send({ body: 'hi' });
+
+    // A non-author cannot delete it.
+    const forbidden = await request(app).delete(`/versions/${id}`).set(auth(other.token));
+    expect(forbidden.status).toBe(403);
+
+    // The author can; the version disappears from the feed and its votes/comments go.
+    const del = await request(app).delete(`/versions/${id}`).set(auth(author.token));
+    expect(del.body).toEqual({ deleted: true });
+    const feed = await request(app).get('/feed').query({ sort: 'latest', scope: 'all' });
+    expect(feed.body.versions.map((v: any) => v.id)).not.toContain(id);
+    const comments = await request(app).get(`/versions/${id}/comments`);
+    expect(comments.body).toHaveLength(0);
+  });
+});
+
 describe('voting', () => {
   it('is sticky (re-voting is a no-op) and switches direction; reports myVote', async () => {
     const author = await makeUser('dave');

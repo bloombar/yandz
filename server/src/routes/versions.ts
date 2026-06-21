@@ -7,7 +7,7 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { Types } from 'mongoose';
-import { Page, Version } from '../models.js';
+import { Page, Version, Vote, Comment, Bookmark } from '../models.js';
 import { requireAuth } from '../lib/auth.js';
 import { pageKey } from '../services/url.js';
 import { sanitizePatchList } from '../services/sanitize.js';
@@ -193,4 +193,31 @@ versionsRouter.get('/:id', async (req, res) => {
     down: v.down,
     createdAt: v.createdAt,
   });
+});
+
+// DELETE /versions/:id — remove a version (author-only) and its votes, comments,
+// and bookmarks; decrement the page's version count.
+versionsRouter.delete('/:id', requireAuth, async (req, res) => {
+  if (!Types.ObjectId.isValid(req.params.id)) {
+    res.status(400).json({ error: 'bad id' });
+    return;
+  }
+  const versionId = new Types.ObjectId(req.params.id);
+  const version = await Version.findById(versionId).select('authorId pageId');
+  if (!version) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  if (String(version.authorId) !== req.userId) {
+    res.status(403).json({ error: 'forbidden' });
+    return;
+  }
+  await Promise.all([
+    Version.deleteOne({ _id: versionId }),
+    Vote.deleteMany({ versionId }),
+    Comment.deleteMany({ versionId }),
+    Bookmark.deleteMany({ versionId }),
+  ]);
+  await Page.updateOne({ _id: version.pageId }, { $inc: { versionCount: -1 } });
+  res.json({ deleted: true });
 });

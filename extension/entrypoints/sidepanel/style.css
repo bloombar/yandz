@@ -48,6 +48,9 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 /* The viewer's current vote stands out (green up / red down). */
 .vote-up.active { color: #2ecc71; }
 .vote-down.active { color: #e74c3c; }
+/* Net score tinted to match the viewer's own vote. */
+.vote-up-text { color: #2ecc71; }
+.vote-down-text { color: #e74c3c; }
 .icon-btn .count { font-size: 11px; color: #8889; }
 /* Panel header with top-right close icon. */
 .panel-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #8883; }

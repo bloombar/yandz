@@ -63,6 +63,19 @@ export async function getToken(): Promise<string | null> {
   }
 }
 
+/** Decode the current user from the stored JWT (no network call), or null. */
+export async function getCurrentUser(): Promise<{ id: string; handle: string } | null> {
+  const token = await getToken();
+  if (!token) return null;
+  try {
+    const part = token.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(part)) as { sub: string; handle: string };
+    return { id: payload.sub, handle: payload.handle };
+  } catch {
+    return null;
+  }
+}
+
 export async function setToken(token: string | null): Promise<void> {
   if (token) await browser.storage.session.set({ token });
   else await browser.storage.session.remove('token');
@@ -145,6 +158,9 @@ export const Api = {
   // Replace an existing version's patch set (used by debounced auto-save).
   updateVersion: (id: string, input: { name?: string; patches: AnyPatch[] }) =>
     api<{ id: string }>(`/versions/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
+
+  // Delete a version the viewer authored.
+  deleteVersion: (id: string) => api<{ deleted: boolean }>(`/versions/${id}`, { method: 'DELETE' }),
 
   vote: (id: string, value: 1 | -1) =>
     api<{ up: number; down: number; myVote: 1 | -1 | 0 }>(`/versions/${id}/vote`, {

@@ -9,20 +9,23 @@
  * The page title + site URL always show so a global-feed viewer can tell which page
  * each version modifies.
  */
-import React from 'react';
-import { ChevronUp, ChevronDown, MessageSquare, Bookmark, Share2, GitFork, Check } from 'lucide-react';
+import React, { useState } from 'react';
+import { ChevronUp, ChevronDown, MessageSquare, Bookmark, Share2, GitFork, Check, MoreVertical } from 'lucide-react';
 import type { FeedItem } from '../../../lib/api.js';
 
 interface Props {
   version: FeedItem;
   /** True when this version is the one currently applied on the active tab. */
   active?: boolean;
+  /** The viewer's user id, so the author gets a delete menu on their own versions. */
+  currentUserId?: string | null;
   onApply: (v: FeedItem) => void;
   onVote: (v: FeedItem, value: 1 | -1) => void;
   onOpenProfile: (userId: string) => void;
   onOpenComments: (v: FeedItem) => void;
   onToggleBookmark: (v: FeedItem) => void;
   onShare: (v: FeedItem) => void;
+  onDelete: (v: FeedItem) => void;
 }
 
 /** Middle-truncate a long URL so the host and tail stay visible. */
@@ -34,13 +37,17 @@ function shortUrl(urlKey: string): string {
 export function VersionRow({
   version: v,
   active,
+  currentUserId,
   onApply,
   onVote,
   onOpenProfile,
   onOpenComments,
   onToggleBookmark,
   onShare,
+  onDelete,
 }: Props): React.JSX.Element {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const isAuthor = !!currentUserId && currentUserId === v.author.id;
   return (
     <div className="version-row">
       {/* Top line: title (apply) + comment / bookmark / share icons. */}
@@ -69,6 +76,27 @@ export function VersionRow({
           <button className="icon-btn" title="Share" onClick={() => onShare(v)}>
             <Share2 size={14} />
           </button>
+          {/* Author-only menu (same kebab style as block/mute) with Delete. */}
+          {isAuthor && (
+            <div className="kebab">
+              <button className="icon-btn" aria-label="More" title="More" onClick={() => setMenuOpen((o) => !o)}>
+                <MoreVertical size={14} />
+              </button>
+              {menuOpen && (
+                <div className="kebab-menu" onMouseLeave={() => setMenuOpen(false)}>
+                  <button
+                    className="kebab-item"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      if (confirm('Delete this version? This can’t be undone.')) onDelete(v);
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -105,7 +133,10 @@ export function VersionRow({
           >
             <ChevronDown size={14} />
           </button>
-          <strong>{v.up - v.down}</strong>
+          {/* Net score, colored to match the viewer's own vote. */}
+          <strong className={v.myVote === 1 ? 'vote-up-text' : v.myVote === -1 ? 'vote-down-text' : ''}>
+            {v.up - v.down}
+          </strong>
           <button
             className={`icon-btn vote-up ${v.myVote === 1 ? 'active' : ''}`}
             aria-label="upvote"

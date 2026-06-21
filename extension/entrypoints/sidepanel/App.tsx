@@ -12,6 +12,7 @@ import {
   Api,
   getToken,
   setToken,
+  getCurrentUser,
   type FeedItem,
   type FeedScope,
   type FeedSort,
@@ -56,6 +57,7 @@ export function App(): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [shareNote, setShareNote] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // Navigation stack — closing a panel pops back to the previous view.
   const [stack, setStack] = useState<View[]>([{ name: 'feed' }]);
@@ -79,7 +81,8 @@ export function App(): React.JSX.Element {
     void getToken()
       .then((t) => setAuthed(!!t))
       .catch(() => setAuthed(false));
-  }, []);
+    void getCurrentUser().then((u) => setCurrentUserId(u?.id ?? null));
+  }, [authed]);
 
   const lastUrlRef = useRef<string | undefined>(undefined);
 
@@ -167,6 +170,15 @@ export function App(): React.JSX.Element {
     if (res.method === 'copied') {
       setShareNote('Link copied');
       setTimeout(() => setShareNote(null), 2000);
+    }
+  };
+
+  const onDelete = async (v: FeedItem) => {
+    await Api.deleteVersion(v.id).catch(() => {});
+    setItems((xs) => xs.filter((x) => x.id !== v.id));
+    if (selectedId === v.id) {
+      setSelectedId(null);
+      void messageTab({ type: 'yandz:revert' });
     }
   };
 
@@ -290,12 +302,14 @@ export function App(): React.JSX.Element {
                 key={v.id}
                 version={v}
                 active={v.id === selectedId}
+                currentUserId={currentUserId}
                 onApply={onApply}
                 onVote={onVote}
                 onOpenProfile={(userId) => push({ name: 'profile', userId })}
                 onOpenComments={(x) => push({ name: 'comments', version: x })}
                 onToggleBookmark={onToggleBookmark}
                 onShare={onShare}
+                onDelete={onDelete}
               />
             ))}
             {items.length === 0 &&
@@ -310,7 +324,7 @@ export function App(): React.JSX.Element {
         </>
       )}
 
-      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(v) => push({ name: 'comments', version: v })} currentPageKey={currentPageKey} />}
+      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(v) => push({ name: 'comments', version: v })} currentPageKey={currentPageKey} currentUserId={currentUserId} />}
       {view.name === 'comments' && <Comments version={view.version} onClose={close} />}
       {view.name === 'settings' && (
         <Settings onOpenProfile={(userId) => push({ name: 'profile', userId })} onClose={close} />

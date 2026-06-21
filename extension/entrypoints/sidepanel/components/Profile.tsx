@@ -19,12 +19,20 @@ interface ProfileData {
 interface Props {
   userId: string;
   currentPageKey: string | null;
+  currentUserId: string | null;
   onClose: () => void;
   onOpenProfile: (userId: string) => void;
   onOpenComments: (version: FeedItem) => void;
 }
 
-export function Profile({ userId, currentPageKey, onClose, onOpenProfile, onOpenComments }: Props): React.JSX.Element {
+export function Profile({
+  userId,
+  currentPageKey,
+  currentUserId,
+  onClose,
+  onOpenProfile,
+  onOpenComments,
+}: Props): React.JSX.Element {
   const [data, setData] = useState<ProfileData | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -53,6 +61,10 @@ export function Profile({ userId, currentPageKey, onClose, onOpenProfile, onOpen
     const on = !v.bookmarked;
     await Api.toggleBookmark(v.id, on).catch(() => {});
     setMods((xs) => xs.map((x) => (x.id === v.id ? { ...x, bookmarked: on } : x)));
+  };
+  const onDelete = async (v: FeedItem) => {
+    await Api.deleteVersion(v.id).catch(() => {});
+    setMods((xs) => xs.filter((x) => x.id !== v.id));
   };
 
   return (
@@ -94,12 +106,14 @@ export function Profile({ userId, currentPageKey, onClose, onOpenProfile, onOpen
         <VersionRow
           key={v.id}
           version={v}
+          currentUserId={currentUserId}
           onApply={(x) => void applyVersionAnywhere(x.id, x.page.urlKey, currentPageKey)}
           onVote={onVote}
           onOpenProfile={onOpenProfile}
           onOpenComments={(x) => onOpenComments(x)}
           onToggleBookmark={onToggleBookmark}
           onShare={(x) => void shareVersion(x.page.urlKey, x.id, x.name)}
+          onDelete={onDelete}
         />
       ))}
       {data.modifications.length === 0 && <p className="muted">No modifications yet.</p>}
