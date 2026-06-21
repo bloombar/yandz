@@ -32,3 +32,16 @@ export function normalizeUrl(raw: string, mode: 'exact' | 'path' = 'exact'): str
   }
   return u.toString();
 }
+
+/**
+ * The identity key for a Page. Pages are keyed by PATH (query string dropped) so
+ * that volatile/cache-buster query params (e.g. `?v=3`, A/B flags) don't split one
+ * page into many. Used for both version creation and version lookup so reads and
+ * writes always resolve to the same page.
+ *
+ * Trade-off: query-significant URLs (search results, ?id= app routes) collapse to
+ * one page. Finer per-version scoping is handled by the version's urlMatch mode.
+ */
+export function pageKey(rawUrl: string): string {
+  return normalizeUrl(rawUrl, 'path');
+}

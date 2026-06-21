@@ -60,39 +60,13 @@ export default defineContentScript({
       }
     }
 
-    // Fetch versions (best-effort; failures leave the page untouched).
-    let data: Awaited<ReturnType<typeof Api.getVersionsForUrl>> | null = null;
-    try {
-      data = await Api.getVersionsForUrl(location.href);
-    } catch {
-      return; // backend unreachable → act as if no versions
-    }
-    if (!data || data.versions.length === 0) return;
+    // IMPORTANT: register the message listener and the MutationObserver
+    // UNCONDITIONALLY (before any early exit), so the editor's "Pick element" /
+    // "Draw" work even on pages that have no modifications yet — i.e. when you're
+    // creating the very first version. Only the floating icon and auto-apply
+    // depend on there being existing versions.
 
-    const topVersion = data.versions[0]!;
-
-    // Mount the floating icon with the version count.
-    mountFloatingIcon({
-      count: data.versions.length,
-      onClick: () => browser.runtime.sendMessage({ type: 'yandz:open-panel' }),
-    });
-
-    // A "pending apply" flag (set when a profile card is clicked) takes priority:
-    // apply that exact version once, regardless of consent, then clear the flag.
-    const pendingKey = `pendingApply:${data.page.urlKey}`;
-    const pendingId = (await browser.storage.local.get(pendingKey))[pendingKey] as string | undefined;
-    if (pendingId) {
-      await browser.storage.local.remove(pendingKey);
-      const requested = data.versions.find((v) => v.id === pendingId);
-      if (requested) applyVersion(requested);
-      else if (await hasConsent()) applyVersion(topVersion);
-    } else if (await hasConsent()) {
-      // Otherwise auto-apply the top version only after one-time per-site consent.
-      applyVersion(topVersion);
-    }
-
-    // Re-apply on DOM churn (SPA navigations, lazy content). Debounced so we don't
-    // thrash on rapid mutations.
+    // Re-apply on DOM churn (SPA navigations, lazy content). Debounced.
     let raf = 0;
     const observer = new MutationObserver(() => {
       if (raf) return;
@@ -106,18 +80,21 @@ export default defineContentScript({
     }
     ctx.onInvalidated(() => observer.disconnect());
 
-    // Messages from the side panel: switch version, revert, grant consent, pick.
+    // Holds the fetched versions once loaded (null until then / on failure).
+    let data: Awaited<ReturnType<typeof Api.getVersionsForUrl>> | null = null;
+
+    // Messages from the side panel: switch version, revert, grant consent, pick, draw.
     browser.runtime.onMessage.addListener((msg: any) => {
       switch (msg?.type) {
         case 'yandz:apply-version':
-          applyVersion(data!.versions.find((v) => v.id === msg.versionId) ?? null);
+          applyVersion(data?.versions.find((v) => v.id === msg.versionId) ?? null);
           break;
         case 'yandz:revert':
           applyVersion(null);
           break;
         case 'yandz:grant-consent':
           void browser.storage.local.set({ [consentKey]: true });
-          applyVersion(topVersion);
+          if (data?.versions[0]) applyVersion(data.versions[0]);
           break;
         case 'yandz:start-picker':
           // Open the inspector; on selection, return the element's fingerprint and a
@@ -146,5 +123,34 @@ export default defineContentScript({
           break;
       }
     });
+
+    // Fetch existing versions (best-effort; a failure or empty result just means
+    // no floating icon / nothing to auto-apply — editing still works via the panel).
+    try {
+      data = await Api.getVersionsForUrl(location.href);
+    } catch {
+      return; // backend unreachable
+    }
+    if (!data || data.versions.length === 0) return;
+
+    // Mount the floating icon with the version count.
+    mountFloatingIcon({
+      count: data.versions.length,
+      onClick: () => browser.runtime.sendMessage({ type: 'yandz:open-panel' }),
+    });
+
+    // A "pending apply" flag (set when a profile card is clicked) takes priority:
+    // apply that exact version once, regardless of consent, then clear the flag.
+    const pendingKey = `pendingApply:${data.page.urlKey}`;
+    const pendingId = (await browser.storage.local.get(pendingKey))[pendingKey] as string | undefined;
+    if (pendingId) {
+      await browser.storage.local.remove(pendingKey);
+      const requested = data.versions.find((v) => v.id === pendingId);
+      if (requested) applyVersion(requested);
+      else if (await hasConsent()) applyVersion(data.versions[0]!);
+    } else if (await hasConsent()) {
+      // Otherwise auto-apply the top version only after one-time per-site consent.
+      applyVersion(data.versions[0]!);
+    }
   },
 });

@@ -5,7 +5,7 @@
  */
 import { Router, type Request, type Response } from 'express';
 import { Page, Version, User } from '../models.js';
-import { normalizeUrl } from '../services/url.js';
+import { pageKey } from '../services/url.js';
 import { loadViewerSocial } from '../services/social.js';
 import { sortVersions, type SortMode, type Rankable } from '@yandz/shared';
 
@@ -39,7 +39,7 @@ pagesRouter.get('/', async (req: Request, res: Response) => {
     return;
   }
   const sort = (String(req.query.sort ?? 'hot') as SortMode);
-  const urlKey = normalizeUrl(rawUrl);
+  const urlKey = pageKey(rawUrl);
 
   const page = await Page.findOne({ urlKey }).lean();
   if (!page) {

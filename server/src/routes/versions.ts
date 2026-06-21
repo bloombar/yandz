@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { Types } from 'mongoose';
 import { Page, Version } from '../models.js';
 import { requireAuth } from '../lib/auth.js';
-import { normalizeUrl } from '../services/url.js';
+import { pageKey } from '../services/url.js';
 import { sanitizePatchList } from '../services/sanitize.js';
 import { recomputeVersionScore } from '../services/scoring.js';
 import { notifyFollowersOfNewVersion } from '../services/webpush.js';
@@ -36,7 +36,7 @@ const createSchema = z.object({
 
 /** Find or create the Page row for a URL, returning its id + urlKey. */
 async function upsertPage(url: string, title?: string): Promise<{ id: Types.ObjectId; urlKey: string }> {
-  const urlKey = normalizeUrl(url);
+  const urlKey = pageKey(url);
   const page = await Page.findOneAndUpdate(
     { urlKey },
     { $setOnInsert: { urlKey, urlOriginal: url }, ...(title ? { $set: { title } } : {}) },

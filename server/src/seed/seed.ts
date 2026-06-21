@@ -14,7 +14,7 @@ import bcrypt from 'bcryptjs';
 import { config } from '../config.js';
 import { connectDb, disconnectDb } from '../db.js';
 import { User, Page, Version, Vote, Comment, Follow, Mute, Block, PushSub } from '../models.js';
-import { normalizeUrl } from '../services/url.js';
+import { pageKey } from '../services/url.js';
 import { sanitizePatchList } from '../services/sanitize.js';
 import { recomputeVersionScore } from '../services/scoring.js';
 import { USERS, PAGES, FOLLOWS, buildPatches } from './mock-data.js';
@@ -61,7 +61,7 @@ async function seed(): Promise<void> {
 
   // --- Pages -------------------------------------------------------------
   const pages = await Page.insertMany(
-    PAGES.map((p) => ({ urlKey: normalizeUrl(p.url), urlOriginal: p.url, title: p.title, versionCount: 0 })),
+    PAGES.map((p) => ({ urlKey: pageKey(p.url), urlOriginal: p.url, title: p.title, versionCount: 0 })),
   );
 
   // --- Versions: each user modifies each page (25 total) -----------------
