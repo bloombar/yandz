@@ -1,0 +1,25 @@
+{
+  "name": "y-and-z",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Y and Z — collaborative web-page remixing browser extension: modify any page, share patches, fork, vote, discuss.",
+  "workspaces": [
+    "shared",
+    "server",
+    "extension",
+    "e2e"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace=server",
+    "dev:ext": "npm run dev --workspace=@yandz/extension",
+    "dev:ext:firefox": "npm run dev:firefox --workspace=@yandz/extension",
+    "build": "npm run build --workspace=shared && npm run build --workspace=server && npm run build --workspace=@yandz/extension",
+    "test": "npm run test --workspace=shared && npm run test --workspace=server && npm run test --workspace=@yandz/extension",
+    "test:coverage": "npm run test:coverage --workspaces --if-present",
+    "test:live": "npm run test:live --workspace=server",
+    "test:e2e": "npm run test --workspace=@yandz/e2e"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

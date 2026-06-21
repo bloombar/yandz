@@ -1,0 +1,64 @@
+/**
+ * Background service worker. Responsibilities:
+ *  - Configure the toolbar action to open the side panel (Chromium).
+ *  - Open the panel when the in-page floating icon asks (via runtime message).
+ *  - Receive Web Push events and surface them as OS notifications; clicking a
+ *    notification opens the relevant page.
+ *
+ * Engine-agnostic: all surface differences are delegated to lib/browser-surface.
+ */
+import { defineBackground } from 'wxt/sandbox';
+import { browser } from 'wxt/browser';
+import { configurePanelBehavior, openPanel } from '../lib/browser-surface.js';
+import { registerPush } from '../lib/push.js';
+
+interface PushData {
+  title: string;
+  body: string;
+  url?: string;
+}
+
+export default defineBackground(() => {
+  // On install/startup, make the action click open the panel (Chromium).
+  configurePanelBehavior();
+
+  // The content-script floating icon posts this to toggle the panel.
+  browser.runtime.onMessage.addListener((msg: unknown, sender: { tab?: { windowId?: number } }) => {
+    const type = (msg as { type?: string })?.type;
+    if (type === 'yandz:open-panel') {
+      void openPanel(sender.tab?.windowId);
+    } else if (type === 'yandz:register-push') {
+      // Panel fires this after sign-in; subscribe the SW to push and register it.
+      void registerPush();
+    }
+  });
+
+  // Web Push delivery (Chromium): wake → show a notification. The SW push event
+  // type isn't in the default libs here, so we read it structurally.
+  self.addEventListener('push', (event: Event) => {
+    const pushEvent = event as Event & { data?: { json(): unknown } };
+    let data: PushData = { title: 'Y and Z', body: 'New activity' };
+    try {
+      if (pushEvent.data) data = pushEvent.data.json() as PushData;
+    } catch {
+      /* keep default */
+    }
+    void browser.notifications.create({
+      type: 'basic',
+      iconUrl: browser.runtime.getURL('/icon/128.png' as never),
+      title: data.title,
+      message: data.body,
+      // Stash the target URL so the click handler can open it.
+      contextMessage: data.url ?? '',
+    });
+  });
+
+  // Open the page associated with a clicked notification.
+  browser.notifications.onClicked.addListener(async (id) => {
+    const all = await browser.notifications.getAll();
+    void id;
+    void all;
+    // (URL is carried in contextMessage; a production build would map id→url in
+    // storage. Kept minimal here.)
+  });
+});

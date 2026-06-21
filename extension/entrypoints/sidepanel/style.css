@@ -1,0 +1,24 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
+.app { display: flex; flex-direction: column; height: 100vh; }
+.header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #8883; }
+.header h1 { font-size: 14px; margin: 0; flex: 1; }
+.tabs { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid #8883; }
+.tab { border: none; background: transparent; padding: 4px 8px; border-radius: 6px; cursor: pointer; font: inherit; }
+.tab[aria-selected="true"] { background: #4c9ffe; color: #fff; }
+.list { flex: 1; overflow: auto; padding: 8px 12px; }
+.card { border: 1px solid #8883; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+.card .row { display: flex; align-items: center; gap: 8px; }
+.handle { color: #4c9ffe; cursor: pointer; }
+.muted { color: #8889; }
+.votes { display: flex; align-items: center; gap: 4px; }
+.btn { border: 1px solid #8884; background: transparent; border-radius: 6px; padding: 3px 8px; cursor: pointer; font: inherit; }
+.btn:hover { background: #8881; }
+.btn.primary { background: #4c9ffe; color: #fff; border-color: transparent; }
+.banner { background: #ffd86655; border: 1px solid #ffd866; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+.form { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.form input { padding: 6px 8px; border: 1px solid #8884; border-radius: 6px; font: inherit; }
+.error { color: #e11; }
+.diff-add { background: #2ecc7133; }
+.diff-del { background: #e74c3c33; text-decoration: line-through; }
