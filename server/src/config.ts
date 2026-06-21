@@ -3,6 +3,11 @@
  * truth: dev points at the user's local MongoDB + local MinIO (isolated DB/bucket);
  * prod points at managed Mongo + S3/CloudFront. See §0 of the plan.
  */
+import dotenv from 'dotenv';
+
+// Load .env.<NODE_ENV> (then a plain .env as fallback) before reading any vars.
+// Missing files are ignored, so tests and CI that inject env directly still work.
+dotenv.config({ path: [`.env.${process.env.NODE_ENV ?? 'development'}`, '.env'] });
 
 function env(key: string, fallback?: string): string {
   const v = process.env[key];
