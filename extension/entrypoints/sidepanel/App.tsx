@@ -6,7 +6,7 @@
  * session, plus settings.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Settings as SettingsIcon, MousePointerClick, Pencil } from 'lucide-react';
+import { Settings as SettingsIcon, Type, Brush } from 'lucide-react';
 import { browser } from 'wxt/browser';
 import {
   Api,
@@ -217,11 +217,11 @@ export function App(): React.JSX.Element {
         {/* Centered, bordered, labeled cluster of page-editing tools. */}
         <div className="edit-tools">
           <span className="edit-tools-label">Edit this page:</span>
-          <button className="icon-btn" aria-label="Select an element to edit" title="Select an element" onClick={() => startTool('pick')}>
-            <MousePointerClick size={16} />
+          <button className="icon-btn" aria-label="Select an element to edit its text" title="Edit text" onClick={() => startTool('pick')}>
+            <Type size={16} />
           </button>
-          <button className="icon-btn" aria-label="Draw on the page" title="Draw" onClick={() => startTool('draw')}>
-            <Pencil size={16} />
+          <button className="icon-btn" aria-label="Draw freehand on the page" title="Draw" onClick={() => startTool('draw')}>
+            <Brush size={16} />
           </button>
         </div>
         <button className="icon-btn" aria-label="Settings" title="Settings" onClick={() => push({ name: 'settings' })}>
