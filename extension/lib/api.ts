@@ -28,8 +28,15 @@ export interface VersionSummary {
 
 /** Read the stored auth token (session-scoped). */
 export async function getToken(): Promise<string | null> {
-  const { token } = await browser.storage.session.get('token');
-  return (token as string) ?? null;
+  // storage.session isn't exposed to content scripts unless the access level is
+  // widened (see background). If it's unavailable, fall back to no token — reads
+  // like GET /pages use optional auth and still work unauthenticated.
+  try {
+    const { token } = await browser.storage.session.get('token');
+    return (token as string) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function setToken(token: string | null): Promise<void> {

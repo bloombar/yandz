@@ -22,6 +22,12 @@ export default defineBackground(() => {
   // On install/startup, make the action click open the panel (Chromium).
   configurePanelBehavior();
 
+  // Allow content scripts to read storage.session (where the auth token lives) so
+  // their API calls can be authenticated. Defaults to trusted-only otherwise.
+  const session = (browser.storage as { session?: { setAccessLevel?: (o: { accessLevel: string }) => Promise<void> } })
+    .session;
+  void session?.setAccessLevel?.({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' }).catch(() => {});
+
   // The content-script floating icon posts this to toggle the panel.
   browser.runtime.onMessage.addListener((msg: unknown, sender: { tab?: { windowId?: number } }) => {
     const type = (msg as { type?: string })?.type;
