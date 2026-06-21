@@ -38,6 +38,20 @@ function isEditableTarget(el: Element): boolean {
   return hasOwnText(el) || hasTextAttr(el);
 }
 
+/** Our own injected UI (floating icon, overlays) — never a valid pick target. */
+const OWN_UI_IDS = new Set([
+  'yandz-floating-host',
+  'yandz-overlay-layer',
+  'yandz-picker-overlay',
+  'yandz-draw-capture',
+]);
+function isOwnUi(el: Element | null): boolean {
+  for (let n: Element | null = el; n; n = n.parentElement) {
+    if (n.id && OWN_UI_IDS.has(n.id)) return true;
+  }
+  return false;
+}
+
 /**
  * Resolve the element under the cursor to the best editable target: itself if it
  * has editable content, otherwise the first descendant (document order) that does.
@@ -76,16 +90,25 @@ export function startPicker(onPick: PickCallback): () => void {
   function onMove(e: MouseEvent): void {
     // elementFromPoint ignores our pointer-events:none overlay.
     const raw = document.elementFromPoint(e.clientX, e.clientY);
-    if (!raw || raw === overlay || raw === lastRaw) return;
+    // Never highlight our own UI (the floating icon / overlays).
+    if (!raw || raw === overlay || isOwnUi(raw)) {
+      overlay.style.width = '0px';
+      overlay.style.height = '0px';
+      lastRaw = null;
+      return;
+    }
+    if (raw === lastRaw) return;
     lastRaw = raw;
     // Highlight the resolved editable target, not necessarily the raw element.
     highlight(resolveEditableTarget(raw));
   }
 
   function onClick(e: MouseEvent): void {
+    const raw = document.elementFromPoint(e.clientX, e.clientY);
+    // Ignore clicks on our own UI — don't pick it, keep the picker active.
+    if (isOwnUi(raw)) return;
     e.preventDefault();
     e.stopPropagation();
-    const raw = document.elementFromPoint(e.clientX, e.clientY);
     cleanup();
     if (raw) onPick(resolveEditableTarget(raw));
   }

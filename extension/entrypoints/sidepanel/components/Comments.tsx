@@ -89,27 +89,25 @@ export function Comments({ version, onClose }: Props): React.JSX.Element {
         </div>
       </div>
 
-      {(tree.get(null) ?? []).map((c) => renderNode(c, 0))}
-      {comments.length === 0 && <p className="muted">No comments yet. Start the discussion.</p>}
+      <div className="panel-body">
+        {(tree.get(null) ?? []).map((c) => renderNode(c, 0))}
+        {comments.length === 0 && <p className="muted">No comments yet. Start the discussion.</p>}
 
-      <form className="form" style={{ padding: 0, marginTop: 10 }} onSubmit={post}>
-        {replyTo && (
-          <div className="muted">
-            Replying to a comment.{' '}
-            <button type="button" className="btn" onClick={() => setReplyTo(null)}>
-              Cancel
-            </button>
-          </div>
-        )}
-        <input
-          placeholder="Add a comment…"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-        />
-        <button className="btn primary" type="submit">
-          Post
-        </button>
-      </form>
+        <form className="form" style={{ padding: 0, marginTop: 10 }} onSubmit={post}>
+          {replyTo && (
+            <div className="muted">
+              Replying to a comment.{' '}
+              <button type="button" className="btn" onClick={() => setReplyTo(null)}>
+                Cancel
+              </button>
+            </div>
+          )}
+          <input placeholder="Add a comment…" value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <button className="btn primary" type="submit">
+            Post
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

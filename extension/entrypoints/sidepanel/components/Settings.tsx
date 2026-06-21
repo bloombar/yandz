@@ -56,9 +56,11 @@ export function Settings({ onOpenProfile, onClose }: Props): React.JSX.Element {
   return (
     <div className="list">
       <PanelHeader title="Settings" onClose={onClose} />
-      {list('Following', following, (id) => Api.follow(id, false), 'Unfollow')}
-      {list('Muted', muted, (id) => Api.mute(id, false), 'Unmute')}
-      {list('Blocked', blocked, (id) => Api.block(id, false), 'Unblock')}
+      <div className="panel-body">
+        {list('Following', following, (id) => Api.follow(id, false), 'Unfollow')}
+        {list('Muted', muted, (id) => Api.mute(id, false), 'Unmute')}
+        {list('Blocked', blocked, (id) => Api.block(id, false), 'Unblock')}
+      </div>
     </div>
   );
 }

@@ -191,44 +191,46 @@ export function Editor({ url, baseVersionId, initialTool, messageTab, onSaved, o
       {/* The X flushes the pending auto-save, then returns to the list. */}
       <PanelHeader title={baseVersionId ? 'Based on another version' : 'New version'} onClose={() => void done()} />
 
-      <p className="muted" style={{ marginBottom: 8 }}>
-        Use the select-element and draw tools in the top bar to make changes; they auto-save.
-      </p>
-      {hint && <div className="error">{hint}</div>}
-
-      {picked && <PickedEditor picked={picked} onAdd={addPatch} onSwapImage={swapImage} />}
-
-      <h3 className="muted">Pending changes ({patches.length})</h3>
-      {patches.map((p, i) => (
-        <div className="card" key={i}>
-          <code>{p.op}</code> <span className="muted">{p.target.cssSelector ?? p.target.domPath}</span>
-        </div>
-      ))}
-
-      <input
-        style={{ marginTop: 8 }}
-        placeholder="Version name"
-        value={name}
-        onChange={(e) => {
-          dirtyRef.current = true;
-          setName(e.target.value);
-        }}
-      />
-      {patches.length === 0 && (
-        <p className="muted" style={{ marginTop: 8 }}>
-          Use the select-element or draw tool above to make a change. Changes auto-save.
+      <div className="panel-body">
+        <p className="muted" style={{ marginTop: 0 }}>
+          Use the select-element and draw tools in the top bar to make changes; they auto-save.
         </p>
-      )}
-      {error && <div className="error">{error}</div>}
-      {/* Discrete auto-save status. */}
-      <div className="muted save-status" aria-live="polite" style={{ marginTop: 8 }}>
-        {status === 'saving'
-          ? 'Auto-saving…'
-          : lastSavedAt
-            ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}`
-            : status === 'pending'
-              ? 'Editing…'
-              : ''}
+        {hint && <div className="error">{hint}</div>}
+
+        {picked && <PickedEditor picked={picked} onAdd={addPatch} onSwapImage={swapImage} />}
+
+        <h3 className="muted">Pending changes ({patches.length})</h3>
+        {patches.map((p, i) => (
+          <div className="card" key={i}>
+            <code>{p.op}</code> <span className="muted">{p.target.cssSelector ?? p.target.domPath}</span>
+          </div>
+        ))}
+
+        <input
+          style={{ marginTop: 8 }}
+          placeholder="Version name"
+          value={name}
+          onChange={(e) => {
+            dirtyRef.current = true;
+            setName(e.target.value);
+          }}
+        />
+        {patches.length === 0 && (
+          <p className="muted" style={{ marginTop: 8 }}>
+            Use the select-element or draw tool above to make a change. Changes auto-save.
+          </p>
+        )}
+        {error && <div className="error">{error}</div>}
+        {/* Discrete auto-save status. */}
+        <div className="muted save-status" aria-live="polite" style={{ marginTop: 8 }}>
+          {status === 'saving'
+            ? 'Auto-saving…'
+            : lastSavedAt
+              ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}`
+              : status === 'pending'
+                ? 'Editing…'
+                : ''}
+        </div>
       </div>
     </div>
   );
