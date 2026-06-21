@@ -48,7 +48,14 @@ export function rankForViewer(hotScore: number, viewerFollowsAuthor: boolean): n
   return hotScore + (viewerFollowsAuthor ? FOLLOW_BOOST : 0);
 }
 
-export type SortMode = 'hot' | 'top' | 'new';
+/**
+ * The two feeds offered in the UI:
+ *  - 'foryou' — personalized rank: time-decayed vote score plus a boost for authors
+ *    the viewer follows.
+ *  - 'latest' — strictly reverse-chronological.
+ * Both are applied after block-filtering, which happens server-side.
+ */
+export type SortMode = 'foryou' | 'latest';
 
 export interface Rankable {
   hotScore: number;
@@ -59,7 +66,7 @@ export interface Rankable {
 
 /**
  * Sort a list of versions for a given viewer & mode. `followedAuthorIds` is the
- * viewer's follow set (used only for 'hot'). Returns a new, sorted array.
+ * viewer's follow set (used only by 'foryou'). Returns a new, sorted array.
  */
 export function sortVersions<T extends Rankable>(
   items: T[],
@@ -68,13 +75,10 @@ export function sortVersions<T extends Rankable>(
 ): T[] {
   const copy = [...items];
   switch (mode) {
-    case 'top':
-      copy.sort((a, b) => b.wilsonScore - a.wilsonScore || b.createdAtMs - a.createdAtMs);
-      break;
-    case 'new':
+    case 'latest':
       copy.sort((a, b) => b.createdAtMs - a.createdAtMs);
       break;
-    case 'hot':
+    case 'foryou':
     default:
       copy.sort(
         (a, b) =>

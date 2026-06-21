@@ -59,38 +59,24 @@ describe('sortVersions', () => {
     { hotScore: 0.5, wilsonScore: 0.7, createdAtMs: 200, authorId: 'c' },
   ];
 
-  it('hot: orders by hotScore by default', () => {
-    const out = sortVersions(base, 'hot', new Set());
+  it('foryou: orders by personalized hot score by default', () => {
+    const out = sortVersions(base, 'foryou', new Set());
     expect(out.map((v) => v.authorId)).toEqual(['b', 'a', 'c']);
   });
 
-  it('hot: follow-boost can lift a followed author above a higher base score', () => {
-    const out = sortVersions(base, 'hot', new Set(['a']));
+  it('foryou: follow-boost can lift a followed author above a higher base score', () => {
+    const out = sortVersions(base, 'foryou', new Set(['a']));
     expect(out[0]!.authorId).toBe('a'); // 1 + 1.5 = 2.5 > 2
   });
 
-  it('top: orders by wilsonScore', () => {
-    const out = sortVersions(base, 'top', new Set());
-    expect(out.map((v) => v.authorId)).toEqual(['a', 'c', 'b']);
-  });
-
-  it('top: breaks wilson ties by recency', () => {
-    const tied: Rankable[] = [
-      { hotScore: 0, wilsonScore: 0.5, createdAtMs: 100, authorId: 'old' },
-      { hotScore: 0, wilsonScore: 0.5, createdAtMs: 200, authorId: 'new' },
-    ];
-    const out = sortVersions(tied, 'top', new Set());
-    expect(out.map((v) => v.authorId)).toEqual(['new', 'old']);
-  });
-
-  it('new: orders by recency', () => {
-    const out = sortVersions(base, 'new', new Set());
+  it('latest: orders by recency', () => {
+    const out = sortVersions(base, 'latest', new Set());
     expect(out.map((v) => v.authorId)).toEqual(['a', 'c', 'b']);
   });
 
   it('does not mutate the input array', () => {
     const copy = [...base];
-    sortVersions(base, 'hot', new Set());
+    sortVersions(base, 'foryou', new Set());
     expect(base).toEqual(copy);
   });
 });

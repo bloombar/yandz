@@ -83,7 +83,7 @@ export const Api = {
       body: JSON.stringify({ idToken, handle }),
     }),
 
-  getVersionsForUrl: (url: string, sort: 'hot' | 'top' | 'new' = 'hot') =>
+  getVersionsForUrl: (url: string, sort: 'foryou' | 'latest' = 'foryou') =>
     api<{ page: { urlKey: string; versionCount: number }; versions: VersionSummary[] }>(
       `/pages?url=${encodeURIComponent(url)}&sort=${sort}`,
     ),

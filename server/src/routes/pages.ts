@@ -38,7 +38,7 @@ pagesRouter.get('/', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'url required' });
     return;
   }
-  const sort = (String(req.query.sort ?? 'hot') as SortMode);
+  const sort = (String(req.query.sort ?? 'foryou') as SortMode);
   const urlKey = pageKey(rawUrl);
 
   const page = await Page.findOne({ urlKey }).lean();

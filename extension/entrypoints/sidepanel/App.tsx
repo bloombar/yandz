@@ -37,7 +37,7 @@ export function App(): React.JSX.Element {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [url, setUrl] = useState<string | undefined>();
   const [versions, setVersions] = useState<VersionSummary[]>([]);
-  const [sort, setSort] = useState<'hot' | 'top' | 'new'>('hot');
+  const [sort, setSort] = useState<'foryou' | 'latest'>('foryou');
   const [view, setView] = useState<View>({ name: 'versions' });
   const [consented, setConsented] = useState(true);
   // The version to highlight as selected in the list (e.g. just after saving).
@@ -144,9 +144,18 @@ export function App(): React.JSX.Element {
             </div>
           )}
           <div className="tabs" role="tablist">
-            {(['hot', 'top', 'new'] as const).map((s) => (
-              <button key={s} className="tab" role="tab" aria-selected={sort === s} onClick={() => setSort(s)}>
-                {s[0]!.toUpperCase() + s.slice(1)}
+            {([
+              { key: 'foryou', label: 'For you' },
+              { key: 'latest', label: 'Latest' },
+            ] as const).map((t) => (
+              <button
+                key={t.key}
+                className="tab"
+                role="tab"
+                aria-selected={sort === t.key}
+                onClick={() => setSort(t.key)}
+              >
+                {t.label}
               </button>
             ))}
           </div>
