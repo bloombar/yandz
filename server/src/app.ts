@@ -11,9 +11,11 @@ import { config } from './config.js';
 import { withOptionalAuth } from './lib/auth.js';
 import { authRouter } from './routes/auth.js';
 import { pagesRouter } from './routes/pages.js';
+import { feedRouter } from './routes/feed.js';
 import { versionsRouter } from './routes/versions.js';
 import { votesRouter } from './routes/votes.js';
 import { commentsRouter } from './routes/comments.js';
+import { bookmarksRouter } from './routes/bookmarks.js';
 import { usersRouter } from './routes/users.js';
 import { relationshipsRouter } from './routes/relationships.js';
 import { uploadsRouter } from './routes/uploads.js';
@@ -34,11 +36,13 @@ export function createApp(): Express {
 
   app.use('/auth', authRouter);
   app.use('/pages', withOptionalAuth, pagesRouter);
+  app.use('/feed', withOptionalAuth, feedRouter); // global + this-page feeds
 
-  // Versions: writes are rate-limited; votes & comments hang off the same prefix.
+  // Versions: writes are rate-limited; votes, comments & bookmarks share the prefix.
   app.use('/versions', withOptionalAuth, writeLimiter, versionsRouter);
   app.use('/versions', withOptionalAuth, votesRouter);
   app.use('/versions', withOptionalAuth, commentsRouter);
+  app.use('/versions', withOptionalAuth, bookmarksRouter);
 
   app.use('/users', usersRouter); // mixes requireAuth/withOptionalAuth per-route
   app.use('/users', relationshipsRouter);

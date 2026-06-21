@@ -177,10 +177,13 @@ export default defineContentScript({
       onClick: () => browser.runtime.sendMessage({ type: 'yandz:open-panel' }),
     });
 
-    // A "pending apply" flag (set when a profile card is clicked) takes priority:
-    // apply that exact version once, regardless of consent, then clear the flag.
+    // A shared link (`#yandz-v=<id>`) or a "pending apply" flag (set when a profile/
+    // feed row is clicked) takes priority: apply that exact version once, regardless
+    // of consent. The hash form lets a shared link auto-apply for any recipient.
+    const hashMatch = location.hash.match(/yandz-v=([a-f0-9]+)/i);
     const pendingKey = `pendingApply:${data.page.urlKey}`;
-    const pendingId = (await browser.storage.local.get(pendingKey))[pendingKey] as string | undefined;
+    const pendingId =
+      hashMatch?.[1] ?? ((await browser.storage.local.get(pendingKey))[pendingKey] as string | undefined);
     if (pendingId) {
       await browser.storage.local.remove(pendingKey);
       const requested = data.versions.find((v) => v.id === pendingId);

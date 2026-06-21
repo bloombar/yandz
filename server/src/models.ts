@@ -130,6 +130,14 @@ const blockSchema = new Schema(
 blockSchema.index({ blockerId: 1, blockedId: 1 }, { unique: true });
 export const Block = model('Block', blockSchema);
 
+// --- Bookmark (a user's saved version) -----------------------------------
+const bookmarkSchema = new Schema(
+  { userId: { type: Types.ObjectId, ref: 'User', required: true }, versionId: { type: Types.ObjectId, ref: 'Version', required: true } },
+  { timestamps: true },
+);
+bookmarkSchema.index({ userId: 1, versionId: 1 }, { unique: true });
+export const Bookmark = model('Bookmark', bookmarkSchema);
+
 // --- Push subscriptions ---------------------------------------------------
 const pushSubSchema = new Schema(
   {

@@ -11,6 +11,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { browser } from 'wxt/browser';
 import { Api } from '../../../lib/api.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../../lib/config.js';
+import { PanelHeader } from './PanelHeader.js';
 import type { AnyPatch, ElementTarget, DrawingStroke } from '@yandz/shared';
 
 /** Auto-save lifecycle, surfaced as discrete status text near the Done button. */
@@ -36,6 +37,8 @@ type EditorMessage = PickedMessage | DrawMessage | TextEditedMessage;
 interface Props {
   url: string;
   baseVersionId?: string;
+  /** Tool to auto-start on mount, when launched from a top-nav tool icon. */
+  initialTool?: 'pick' | 'draw';
   /** Returns false when the content script isn't reachable on the active tab. */
   messageTab: (payload: unknown) => Promise<boolean>;
   /** Called with the new version's id after a successful save. */
@@ -43,7 +46,7 @@ interface Props {
   onClose: () => void;
 }
 
-export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Props): React.JSX.Element {
+export function Editor({ url, baseVersionId, initialTool, messageTab, onSaved, onClose }: Props): React.JSX.Element {
   const [patches, setPatches] = useState<AnyPatch[]>([]);
   const [picked, setPicked] = useState<PickedMessage | null>(null);
   const [name, setName] = useState('');
@@ -70,11 +73,34 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const patchesRef = useRef(patches);
   const nameRef = useRef(name);
+  const dirtyRef = useRef(false); // true once the user makes an edit (gates auto-save)
   patchesRef.current = patches;
   nameRef.current = name;
 
-  const addPatch = (p: Omit<AnyPatch, 'order'>) =>
+  const addPatch = (p: Omit<AnyPatch, 'order'>) => {
+    dirtyRef.current = true;
     setPatches((prev) => [...prev, { ...p, order: prev.length } as AnyPatch]);
+  };
+
+  // When starting from another user's version, preload its patches as the base so the
+  // new (attributed) version builds on them. This load is not a user edit → not dirty.
+  useEffect(() => {
+    if (!baseVersionId) return;
+    void Api.getVersion(baseVersionId)
+      .then((base) => setPatches(base.patches.map((p, i) => ({ ...p, order: i }))))
+      .catch(() => {});
+  }, [baseVersionId]);
+
+  // Auto-start the tool the user launched from the top nav.
+  const startedRef = useRef(false);
+  useEffect(() => {
+    if (startedRef.current || !initialTool) return;
+    startedRef.current = true;
+    void runTool(
+      initialTool === 'pick' ? { type: 'yandz:start-picker' } : { type: 'yandz:start-draw', color: '#e11' },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTool]);
 
   /**
    * Persist the current patch set. The first call creates (or forks) the version;
@@ -110,7 +136,8 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
   // Debounced auto-save: every edit resets the timer; the version is persisted
   // only after AUTOSAVE_DEBOUNCE_MS of inactivity (configurable).
   useEffect(() => {
-    if (patches.length === 0) return;
+    // Only auto-save after a real user edit — not the base-version preload.
+    if (patches.length === 0 || !dirtyRef.current) return;
     setStatus('pending');
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => void persist(), AUTOSAVE_DEBOUNCE_MS);
@@ -161,21 +188,12 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
 
   return (
     <div className="list">
-      <div className="row" style={{ marginBottom: 8 }}>
-        <strong style={{ flex: 1 }}>{baseVersionId ? 'Fork & edit' : 'New version'}</strong>
-        <button className="btn" onClick={onClose}>
-          Close
-        </button>
-      </div>
+      {/* The X flushes the pending auto-save, then returns to the list. */}
+      <PanelHeader title={baseVersionId ? 'Based on another version' : 'New version'} onClose={() => void done()} />
 
-      <div className="row" style={{ gap: 6, marginBottom: 8 }}>
-        <button className="btn primary" onClick={() => void runTool({ type: 'yandz:start-picker' })}>
-          Pick element
-        </button>
-        <button className="btn" onClick={() => void runTool({ type: 'yandz:start-draw', color: '#e11' })}>
-          Draw
-        </button>
-      </div>
+      <p className="muted" style={{ marginBottom: 8 }}>
+        Use the select-element and draw tools in the top bar to make changes; they auto-save.
+      </p>
       {hint && <div className="error">{hint}</div>}
 
       {picked && <PickedEditor picked={picked} onAdd={addPatch} onSwapImage={swapImage} />}
@@ -191,28 +209,26 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
         style={{ marginTop: 8 }}
         placeholder="Version name"
         value={name}
-        onChange={(e) => setName(e.target.value)}
+        onChange={(e) => {
+          dirtyRef.current = true;
+          setName(e.target.value);
+        }}
       />
       {patches.length === 0 && (
         <p className="muted" style={{ marginTop: 8 }}>
-          Pick an element and stage at least one change (e.g. “Replace text”). Changes auto-save.
+          Use the select-element or draw tool above to make a change. Changes auto-save.
         </p>
       )}
       {error && <div className="error">{error}</div>}
-      <div className="row" style={{ marginTop: 8, alignItems: 'center' }}>
-        <button className="btn primary" disabled={patches.length === 0} onClick={done}>
-          Done
-        </button>
-        {/* Discrete auto-save status next to the button. */}
-        <span className="muted save-status" aria-live="polite">
-          {status === 'saving'
-            ? 'Auto-saving…'
-            : lastSavedAt
-              ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}`
-              : status === 'pending'
-                ? 'Editing…'
-                : ''}
-        </span>
+      {/* Discrete auto-save status. */}
+      <div className="muted save-status" aria-live="polite" style={{ marginTop: 8 }}>
+        {status === 'saving'
+          ? 'Auto-saving…'
+          : lastSavedAt
+            ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}`
+            : status === 'pending'
+              ? 'Editing…'
+              : ''}
       </div>
     </div>
   );

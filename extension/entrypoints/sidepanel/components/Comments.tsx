@@ -7,6 +7,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Api } from '../../../lib/api.js';
 import { subscribeToVersionComments, type LiveComment } from '../../../lib/realtime.js';
+import { PanelHeader } from './PanelHeader.js';
 
 interface Props {
   versionId: string;
@@ -73,12 +74,7 @@ export function Comments({ versionId, onClose }: Props): React.JSX.Element {
 
   return (
     <div className="list">
-      <div className="row" style={{ marginBottom: 8 }}>
-        <strong style={{ flex: 1 }}>Discussion</strong>
-        <button className="btn" onClick={onClose}>
-          Close
-        </button>
-      </div>
+      <PanelHeader title="Discussion" onClose={onClose} />
 
       {(tree.get(null) ?? []).map((c) => renderNode(c, 0))}
       {comments.length === 0 && <p className="muted">No comments yet. Start the discussion.</p>}

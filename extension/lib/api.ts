@@ -31,6 +31,21 @@ export interface VersionSummary {
   createdAt: string;
 }
 
+/** A feed/profile row: a version plus the page it modifies + the viewer's bookmark state. */
+export interface FeedItem extends VersionSummary {
+  page: { urlKey: string; title: string };
+  bookmarked: boolean;
+}
+
+export interface FeedResult {
+  /** Normalized key of the active tab's page (for "this page" comparisons), or null. */
+  currentPageKey: string | null;
+  versions: FeedItem[];
+}
+
+export type FeedSort = 'foryou' | 'latest';
+export type FeedScope = 'all' | 'page';
+
 /** Read the stored auth token (session-scoped). */
 export async function getToken(): Promise<string | null> {
   // storage.session isn't exposed to content scripts unless the access level is
@@ -97,6 +112,22 @@ export const Api = {
 
   getVersionsForUrl: (url: string, sort: 'foryou' | 'latest' = 'foryou') =>
     api<PageVersions>(`/pages?url=${encodeURIComponent(url)}&sort=${sort}`),
+
+  // Global (or this-page) feed. `url` is the active tab's URL for scope/comparison.
+  getFeed: (sort: FeedSort, scope: FeedScope, url?: string) =>
+    api<FeedResult>(`/feed?sort=${sort}&scope=${scope}&url=${encodeURIComponent(url ?? '')}`),
+
+  getBookmarksFeed: (scope: FeedScope, url?: string) =>
+    api<FeedResult>(`/feed/bookmarks?scope=${scope}&url=${encodeURIComponent(url ?? '')}`),
+
+  toggleBookmark: (id: string, on: boolean) =>
+    api<{ bookmarked: boolean }>(`/versions/${id}/bookmark`, { method: on ? 'POST' : 'DELETE' }),
+
+  // A single version (used to preload a base when starting an attributed derivative).
+  getVersion: (id: string) =>
+    api<{ id: string; name: string; authorId: string; patches: AnyPatch[]; parentVersionId: string | null }>(
+      `/versions/${id}`,
+    ),
 
   createVersion: (input: { url: string; title?: string; name?: string; patches: AnyPatch[] }) =>
     api<{ id: string }>('/versions', { method: 'POST', body: JSON.stringify(input) }),

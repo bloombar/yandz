@@ -239,3 +239,75 @@ describe('profile', () => {
     expect(bad.status).toBe(200); // valid id, just no such user relationship yet
   });
 });
+
+describe('feed (global + this-page)', () => {
+  it('returns versions across all pages; scope=page narrows to one page', async () => {
+    const u = await makeUser('feeda');
+    const id1 = await makeVersion(u.token, 'https://example.com/f1', 'a');
+    const id2 = await makeVersion(u.token, 'https://example.com/f2', 'b');
+
+    const all = await request(app).get('/feed').query({ sort: 'latest', scope: 'all' });
+    expect(all.status).toBe(200);
+    const allIds = all.body.versions.map((v: any) => v.id);
+    expect(allIds).toEqual(expect.arrayContaining([id1, id2]));
+    // Each row carries the page it modifies.
+    expect(all.body.versions[0].page).toHaveProperty('urlKey');
+    expect(all.body.versions[0].page).toHaveProperty('title');
+
+    const page = await request(app)
+      .get('/feed')
+      .query({ sort: 'latest', scope: 'page', url: 'https://example.com/f1' });
+    const pageIds = page.body.versions.map((v: any) => v.id);
+    expect(pageIds).toContain(id1);
+    expect(pageIds).not.toContain(id2);
+    expect(page.body.currentPageKey).toBe('https://example.com/f1');
+  });
+
+  it('excludes blocked authors from the feed', async () => {
+    const a = await makeUser('feedblka');
+    const b = await makeUser('feedblkb');
+    const bid = await makeVersion(b.token, 'https://example.com/fb', 'byB');
+    let feed = await request(app).get('/feed').query({ sort: 'latest', scope: 'all' }).set(auth(a.token));
+    expect(feed.body.versions.map((v: any) => v.id)).toContain(bid);
+    await request(app).post(`/users/${b.id}/block`).set(auth(a.token));
+    feed = await request(app).get('/feed').query({ sort: 'latest', scope: 'all' }).set(auth(a.token));
+    expect(feed.body.versions.map((v: any) => v.id)).not.toContain(bid);
+  });
+});
+
+describe('bookmarks', () => {
+  it('toggles a bookmark and lists it in the bookmarks feed', async () => {
+    const author = await makeUser('bmauthor');
+    const me = await makeUser('bmme');
+    const id = await makeVersion(author.token, 'https://example.com/bm', 'x');
+
+    const on = await request(app).post(`/versions/${id}/bookmark`).set(auth(me.token));
+    expect(on.body).toEqual({ bookmarked: true });
+
+    let marks = await request(app).get('/feed/bookmarks').query({ scope: 'all' }).set(auth(me.token));
+    expect(marks.body.versions.map((v: any) => v.id)).toContain(id);
+    expect(marks.body.versions.find((v: any) => v.id === id).bookmarked).toBe(true);
+
+    await request(app).delete(`/versions/${id}/bookmark`).set(auth(me.token));
+    marks = await request(app).get('/feed/bookmarks').query({ scope: 'all' }).set(auth(me.token));
+    expect(marks.body.versions.map((v: any) => v.id)).not.toContain(id);
+  });
+
+  it('requires auth for the bookmarks feed', async () => {
+    const r = await request(app).get('/feed/bookmarks').query({ scope: 'all' });
+    expect(r.status).toBe(401);
+  });
+});
+
+describe('versioning is session-based', () => {
+  it('lets one user have multiple versions on the same page', async () => {
+    const u = await makeUser('multi');
+    const url = 'https://example.com/multi';
+    const id1 = await makeVersion(u.token, url, 'first');
+    const id2 = await makeVersion(u.token, url, 'second');
+    expect(id1).not.toBe(id2);
+    const feed = await request(app).get('/feed').query({ sort: 'latest', scope: 'page', url }).set(auth(u.token));
+    const mine = feed.body.versions.filter((v: any) => v.author.handle === 'multi');
+    expect(mine.length).toBe(2);
+  });
+});

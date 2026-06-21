@@ -5,8 +5,9 @@
  */
 import { Router } from 'express';
 import { Types } from 'mongoose';
-import { User, Version, Page, Follow, Mute, Block } from '../models.js';
+import { User, Version, Follow, Mute, Block } from '../models.js';
 import { requireAuth, withOptionalAuth } from '../lib/auth.js';
+import { serializeVersions, type RawVersion } from '../services/serialize.js';
 
 export const usersRouter = Router();
 
@@ -49,21 +50,10 @@ usersRouter.get('/:id', withOptionalAuth, async (req, res) => {
     return;
   }
 
-  // The user's versions, newest first, joined to their pages for display.
+  // The user's versions, newest first, in the shared feed-item shape so the profile
+  // can reuse the same VersionRow component as the feeds.
   const versions = await Version.find({ authorId: target }).sort({ createdAt: -1 }).limit(100).lean();
-  const pages = await Page.find({ _id: { $in: versions.map((v) => v.pageId) } }).select('urlKey title').lean();
-  const pageById = new Map(pages.map((p) => [String(p._id), p]));
-  const modifications = versions.map((v) => {
-    const p = pageById.get(String(v.pageId));
-    return {
-      versionId: String(v._id),
-      pageId: String(v.pageId),
-      urlKey: p?.urlKey ?? '',
-      title: p?.title ?? '',
-      name: v.name,
-      createdAt: v.createdAt,
-    };
-  });
+  const modifications = await serializeVersions(versions as unknown as RawVersion[], req.userId ?? null);
 
   // Viewer's relationship state toward this profile (drives toggle button states).
   let relationship = { following: false, muted: false, blocked: false };

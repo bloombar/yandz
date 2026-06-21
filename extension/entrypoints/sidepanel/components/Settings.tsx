@@ -4,6 +4,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Api, type PublicUser } from '../../../lib/api.js';
+import { PanelHeader } from './PanelHeader.js';
 
 interface Props {
   onOpenProfile: (userId: string) => void;
@@ -54,12 +55,7 @@ export function Settings({ onOpenProfile, onClose }: Props): React.JSX.Element {
 
   return (
     <div className="list">
-      <div className="row" style={{ marginBottom: 8 }}>
-        <strong style={{ flex: 1 }}>Settings</strong>
-        <button className="btn" onClick={onClose}>
-          Close
-        </button>
-      </div>
+      <PanelHeader title="Settings" onClose={onClose} />
       {list('Following', following, (id) => Api.follow(id, false), 'Unfollow')}
       {list('Muted', muted, (id) => Api.mute(id, false), 'Unmute')}
       {list('Blocked', blocked, (id) => Api.block(id, false), 'Unblock')}

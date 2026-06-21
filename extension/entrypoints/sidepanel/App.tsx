@@ -1,56 +1,69 @@
 /**
- * Side panel root. Orchestrates navigation between views and bridges to the active
- * tab's content script:
- *  - versions: ranked list for the active URL (vote / apply / revert / fork / comment).
- *  - editor: build & save a new version or a fork.
- *  - comments: real-time threaded board for a version.
- *  - profile / settings: social graph.
- *
- * After sign-in it asks the background SW to register for push, and reflects the
- * per-origin auto-apply consent in a banner.
+ * Side panel root. Renders the global feeds (For you / Latest / Bookmarks) with an
+ * All ↔ This page scope toggle, and orchestrates a navigation STACK of panels
+ * (profile / comments / editor / settings) where closing pops back to the previous
+ * view. The top nav holds icon tools (select element, draw) that start an editing
+ * session, plus settings.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Settings as SettingsIcon } from 'lucide-react';
+import { Settings as SettingsIcon, MousePointerClick, Pencil } from 'lucide-react';
 import { browser } from 'wxt/browser';
-import { Api, getToken, setToken, type VersionSummary, type PublicUser } from '../../lib/api.js';
+import {
+  Api,
+  getToken,
+  setToken,
+  type FeedItem,
+  type FeedScope,
+  type FeedSort,
+  type PublicUser,
+} from '../../lib/api.js';
+import { applyVersionAnywhere } from '../../lib/apply.js';
+import { shareVersion } from '../../lib/share.js';
 import { AuthForm } from './components/AuthForm.js';
-import { VersionList } from './components/VersionList.js';
+import { VersionRow } from './components/VersionRow.js';
 import { Profile } from './components/Profile.js';
 import { Comments } from './components/Comments.js';
 import { Editor } from './components/Editor.js';
 import { Settings } from './components/Settings.js';
 
 type View =
-  | { name: 'versions' }
+  | { name: 'feed' }
   | { name: 'profile'; userId: string }
   | { name: 'comments'; versionId: string }
-  | { name: 'editor'; baseVersionId?: string }
+  | { name: 'editor'; baseVersionId?: string; initialTool?: 'pick' | 'draw' }
   | { name: 'settings' };
 
-/** Get the active tab's URL + id so we can scope versions and message the page. */
+type TabKey = 'foryou' | 'latest' | 'bookmarks';
+
 async function getActiveTab(): Promise<{ id?: number; url?: string }> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   return { id: tab?.id, url: tab?.url };
 }
 
+/** Whether a URL is a normal web page (content scripts + this-page scope apply). */
+function isWebUrl(url?: string): boolean {
+  return !!url && /^https?:\/\//.test(url);
+}
+
 export function App(): React.JSX.Element {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [url, setUrl] = useState<string | undefined>();
-  const [versions, setVersions] = useState<VersionSummary[]>([]);
-  const [sort, setSort] = useState<'foryou' | 'latest'>('foryou');
-  const [view, setView] = useState<View>({ name: 'versions' });
+  const [tab, setTab] = useState<TabKey>('foryou');
+  const [scope, setScope] = useState<FeedScope>('all');
+  const [items, setItems] = useState<FeedItem[]>([]);
+  const [currentPageKey, setCurrentPageKey] = useState<string | null>(null);
   const [consented, setConsented] = useState(true);
-  // The version to highlight as selected in the list (e.g. just after saving).
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Surfaces why the list is empty (fetch error) instead of silently blanking.
   const [listError, setListError] = useState<string | null>(null);
+  const [shareNote, setShareNote] = useState<string | null>(null);
 
-  /**
-   * Send a message to the content script in the active tab. Returns false if the
-   * content script isn't reachable (e.g. the page was open before the extension
-   * (re)loaded and needs a refresh, or it's a chrome:// / store page where content
-   * scripts can't run) so callers can show actionable guidance.
-   */
+  // Navigation stack — closing a panel pops back to the previous view.
+  const [stack, setStack] = useState<View[]>([{ name: 'feed' }]);
+  const view = stack[stack.length - 1]!;
+  const push = (v: View) => setStack((s) => [...s, v]);
+  const close = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
+
+  /** Message the content script in the active tab; false if unreachable. */
   const messageTab = useCallback(async (payload: unknown): Promise<boolean> => {
     const { id } = await getActiveTab();
     if (id === undefined) return false;
@@ -63,58 +76,54 @@ export function App(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    // Always resolve auth state — never leave the panel stuck on the blank
-    // (authed === null) screen if storage access throws.
     void getToken()
       .then((t) => setAuthed(!!t))
       .catch(() => setAuthed(false));
   }, []);
 
-  // Tracks the last URL we loaded, so a tab/page change clears the applied-version
-  // selection (the applied modification is page-specific).
   const lastUrlRef = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
-    const tab = await getActiveTab();
-    if (tab.url !== lastUrlRef.current) {
-      lastUrlRef.current = tab.url;
+    const active = await getActiveTab();
+    if (active.url !== lastUrlRef.current) {
+      lastUrlRef.current = active.url;
       setSelectedId(null);
     }
-    setUrl(tab.url);
-    if (!tab.url) {
-      setVersions([]);
-      setListError(null);
-      return;
-    }
+    setUrl(active.url);
+    // "This page" only applies to real web pages; otherwise force global.
+    const effScope: FeedScope = scope === 'page' && isWebUrl(active.url) ? 'page' : 'all';
     try {
-      const data = await Api.getVersionsForUrl(tab.url, sort);
-      setVersions(data.versions);
+      const result =
+        tab === 'bookmarks'
+          ? await Api.getBookmarksFeed(effScope, active.url)
+          : await Api.getFeed(tab as FeedSort, effScope, active.url);
+      setItems(result.versions);
+      setCurrentPageKey(result.currentPageKey);
       setListError(null);
     } catch (err) {
-      setVersions([]);
+      setItems([]);
       setListError((err as Error).message || 'Could not reach the server');
     }
-    try {
-      const origin = new URL(tab.url).origin;
-      const key = `consent:${origin}`;
-      setConsented(!!(await browser.storage.local.get(key))[key]);
-    } catch {
-      /* file:// or opaque origin */
+    if (isWebUrl(active.url)) {
+      try {
+        const key = `consent:${new URL(active.url!).origin}`;
+        setConsented(!!(await browser.storage.local.get(key))[key]);
+      } catch {
+        /* opaque origin */
+      }
     }
-  }, [sort]);
+  }, [tab, scope]);
 
   useEffect(() => {
     if (authed) void refresh();
   }, [authed, refresh]);
 
-  // Re-fetch the list whenever the user switches tabs or the active tab finishes
-  // navigating — otherwise the panel stays stuck on whatever it loaded at mount
-  // (e.g. an empty result from a blank tab after a restart).
+  // Re-fetch when the active tab changes / finishes navigating.
   useEffect(() => {
     if (!authed) return;
     const onActivated = () => void refresh();
-    const onUpdated = (_id: number, info: { status?: string }, tab: { active?: boolean }) => {
-      if (info.status === 'complete' && tab.active) void refresh();
+    const onUpdated = (_id: number, info: { status?: string }, t: { active?: boolean }) => {
+      if (info.status === 'complete' && t.active) void refresh();
     };
     browser.tabs.onActivated.addListener(onActivated);
     browser.tabs.onUpdated.addListener(onUpdated);
@@ -127,144 +136,177 @@ export function App(): React.JSX.Element {
   const onAuthed = (_user: PublicUser, token: string) => {
     void setToken(token).then(() => {
       setAuthed(true);
-      // Register for push now that we have a token.
       void browser.runtime.sendMessage({ type: 'yandz:register-push' });
     });
   };
 
-  const onVote = async (v: VersionSummary, value: 1 | -1) => {
+  // --- Row actions ---------------------------------------------------------
+  const onVote = async (v: FeedItem, value: 1 | -1) => {
     const tally = await Api.vote(v.id, value).catch(() => null);
-    if (tally) setVersions((vs) => vs.map((x) => (x.id === v.id ? { ...x, ...tally } : x)));
+    if (tally) setItems((xs) => xs.map((x) => (x.id === v.id ? { ...x, ...tally } : x)));
+  };
+
+  const onApply = (v: FeedItem) => {
+    setSelectedId(v.id);
+    void applyVersionAnywhere(v.id, v.page.urlKey, currentPageKey);
+  };
+
+  const onToggleBookmark = async (v: FeedItem) => {
+    const on = !v.bookmarked;
+    await Api.toggleBookmark(v.id, on).catch(() => {});
+    setItems((xs) =>
+      tab === 'bookmarks' && !on
+        ? xs.filter((x) => x.id !== v.id)
+        : xs.map((x) => (x.id === v.id ? { ...x, bookmarked: on } : x)),
+    );
+  };
+
+  const onShare = async (v: FeedItem) => {
+    const res = await shareVersion(v.page.urlKey, v.id, v.name);
+    if (res.method === 'copied') {
+      setShareNote('Link copied');
+      setTimeout(() => setShareNote(null), 2000);
+    }
   };
 
   const grantConsent = async () => {
-    // Persist consent from the panel itself (not only via the content script,
-    // which may have bailed out early if the backend was unreachable on load),
-    // so it survives sort/tab switches and future page loads.
-    const tab = await getActiveTab();
-    if (tab.url) {
+    if (isWebUrl(url)) {
       try {
-        const origin = new URL(tab.url).origin;
-        await browser.storage.local.set({ [`consent:${origin}`]: true });
+        await browser.storage.local.set({ [`consent:${new URL(url!).origin}`]: true });
       } catch {
-        /* opaque origin (e.g. file://) — skip persistence */
+        /* opaque origin */
       }
     }
     await messageTab({ type: 'yandz:grant-consent' });
     setConsented(true);
   };
 
+  /** Start (or continue) an editing session with a tool. */
+  const startTool = (tool: 'pick' | 'draw') => {
+    if (view.name === 'editor') {
+      void messageTab(
+        tool === 'pick' ? { type: 'yandz:start-picker' } : { type: 'yandz:start-draw', color: '#e11' },
+      );
+    } else {
+      push({ name: 'editor', baseVersionId: selectedId ?? undefined, initialTool: tool });
+    }
+  };
+
   if (authed === null) return <div className="app" />;
   if (!authed) return <AuthForm onAuthed={onAuthed} />;
+
+  const TABS: { key: TabKey; label: string }[] = [
+    { key: 'foryou', label: 'For you' },
+    { key: 'latest', label: 'Latest' },
+    { key: 'bookmarks', label: 'Bookmarks' },
+  ];
 
   return (
     <div className="app">
       <header className="header">
         <h1>Y and Z</h1>
-        {view.name !== 'versions' && (
-          <button className="btn" onClick={() => setView({ name: 'versions' })}>
-            ← Back
-          </button>
-        )}
-        {/* Edit is always available (except while already editing). If a modification
-            is currently applied, Edit forks it; otherwise it starts a new version. */}
-        {view.name !== 'editor' && (
-          <button
-            className="btn"
-            onClick={() => setView({ name: 'editor', baseVersionId: selectedId ?? undefined })}
-          >
-            {selectedId ? 'Edit (fork)' : 'Edit'}
-          </button>
-        )}
-        {view.name === 'versions' && (
-          <button className="btn" aria-label="Settings" onClick={() => setView({ name: 'settings' })}>
-            <SettingsIcon size={14} />
-          </button>
-        )}
+        <button className="icon-btn" aria-label="Select an element to edit" title="Select an element" onClick={() => startTool('pick')}>
+          <MousePointerClick size={16} />
+        </button>
+        <button className="icon-btn" aria-label="Draw on the page" title="Draw" onClick={() => startTool('draw')}>
+          <Pencil size={16} />
+        </button>
+        <button className="icon-btn" aria-label="Settings" title="Settings" onClick={() => push({ name: 'settings' })}>
+          <SettingsIcon size={16} />
+        </button>
       </header>
 
-      {view.name === 'versions' && (
+      {view.name === 'feed' && (
         <>
-          {/* Page-level consent prompt — shown once above the tabs (not per tab). */}
-          {!consented && versions.length > 0 && (
-            <div className="banner">
-              Other users have modified this page. Apply the top version on this site?
-              <div style={{ marginTop: 6 }}>
-                <button className="btn primary" onClick={grantConsent}>
-                  Apply &amp; remember for {url ? new URL(url).host : 'this site'}
-                </button>
-              </div>
-            </div>
-          )}
           <div className="tabs" role="tablist">
-            {([
-              { key: 'foryou', label: 'For you' },
-              { key: 'latest', label: 'Latest' },
-            ] as const).map((t) => (
-              <button
-                key={t.key}
-                className="tab"
-                role="tab"
-                aria-selected={sort === t.key}
-                onClick={() => setSort(t.key)}
-              >
+            {TABS.map((t) => (
+              <button key={t.key} className="tab" role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}>
                 {t.label}
               </button>
             ))}
           </div>
-          <div className="list">
-            <VersionList
-              versions={versions}
-              selectedId={selectedId}
-              onVote={onVote}
-              onApply={(v) => {
-                setSelectedId(v.id);
-                void messageTab({ type: 'yandz:apply-version', versionId: v.id });
-              }}
-              onRevert={() => {
+
+          {/* All ↔ This page scope toggle, only when a real web page is open. */}
+          {isWebUrl(url) && (
+            <div className="scope-toggle">
+              {(['all', 'page'] as const).map((s) => (
+                <button key={s} className={`pill ${scope === s ? 'active' : ''}`} onClick={() => setScope(s)}>
+                  {s === 'all' ? 'All' : 'This page'}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {!consented && isWebUrl(url) && items.some((v) => v.page.urlKey === currentPageKey) && (
+            <div className="banner">
+              Other users have modified this page. Apply the top version on this site?
+              <div style={{ marginTop: 6 }}>
+                <button className="btn primary" onClick={grantConsent}>
+                  Apply &amp; remember for {new URL(url!).host}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {selectedId && (
+            <button
+              className="btn"
+              style={{ margin: '8px 12px 0' }}
+              onClick={() => {
                 setSelectedId(null);
                 void messageTab({ type: 'yandz:revert' });
               }}
-              onOpenProfile={(userId) => setView({ name: 'profile', userId })}
-              onOpenComments={(v) => setView({ name: 'comments', versionId: v.id })}
-            />
-            {versions.length === 0 &&
+            >
+              Revert to original
+            </button>
+          )}
+          {shareNote && <div className="muted" style={{ margin: '6px 12px 0' }}>{shareNote}</div>}
+
+          <div className="list">
+            {items.map((v) => (
+              <VersionRow
+                key={v.id}
+                version={v}
+                active={v.id === selectedId}
+                onApply={onApply}
+                onVote={onVote}
+                onOpenProfile={(userId) => push({ name: 'profile', userId })}
+                onOpenComments={(x) => push({ name: 'comments', versionId: x.id })}
+                onToggleBookmark={onToggleBookmark}
+                onShare={onShare}
+              />
+            ))}
+            {items.length === 0 &&
               (listError ? (
-                <p className="error">Couldn’t load modifications: {listError}</p>
+                <p className="error">Couldn’t load the feed: {listError}</p>
               ) : (
                 <p className="muted">
-                  No modifications yet for {url ? new URL(url).host : 'this page'}.
+                  {tab === 'bookmarks' ? 'No bookmarks yet.' : 'No modifications to show.'}
                 </p>
               ))}
           </div>
         </>
       )}
 
-      {view.name === 'profile' && <Profile userId={view.userId} onClose={() => setView({ name: 'versions' })} />}
-      {view.name === 'comments' && (
-        <Comments versionId={view.versionId} onClose={() => setView({ name: 'versions' })} />
-      )}
+      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(id) => push({ name: 'comments', versionId: id })} currentPageKey={currentPageKey} />}
+      {view.name === 'comments' && <Comments versionId={view.versionId} onClose={close} />}
       {view.name === 'settings' && (
-        <Settings
-          onOpenProfile={(userId) => setView({ name: 'profile', userId })}
-          onClose={() => setView({ name: 'versions' })}
-        />
+        <Settings onOpenProfile={(userId) => push({ name: 'profile', userId })} onClose={close} />
       )}
       {view.name === 'editor' && url && (
         <Editor
           url={url}
           baseVersionId={view.baseVersionId}
+          initialTool={view.initialTool}
           messageTab={messageTab}
           onSaved={async (newId) => {
-            // Return to the list, refresh it, then select + apply the new version.
             await refresh();
             setSelectedId(newId);
-            setView({ name: 'versions' });
+            close();
             await messageTab({ type: 'yandz:apply-version', versionId: newId });
           }}
           onClose={() => {
-            // Auto-save may have already persisted a version; refresh so it shows.
-            setView({ name: 'versions' });
+            close();
             void refresh();
           }}
         />

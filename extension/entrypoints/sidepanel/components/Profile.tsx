@@ -1,85 +1,106 @@
 /**
- * User profile: the u/handle, follow/mute/block toggles, and a reverse-chronological
- * list of the pages this user has modified. Toggling a relationship calls the
- * corresponding API and optimistically updates the button state.
+ * User profile: u/handle with an inline Follow icon, a kebab menu for mute/block,
+ * and the user's modifications rendered with the same VersionRow used by the feeds.
  */
 import React, { useEffect, useState } from 'react';
-import { ExternalLink } from 'lucide-react';
-import { browser } from 'wxt/browser';
-import { Api } from '../../../lib/api.js';
-
-/**
- * Navigate the CURRENT tab to a page with a specific version queued to auto-apply
- * (no new tab). We stash the target versionId under a per-urlKey storage flag; the
- * content script reads and clears it on load (see entrypoints/content.ts), applying
- * that version even without prior consent — the click is an explicit request to
- * view this mod.
- */
-async function openWithVersion(urlKey: string, versionId: string): Promise<void> {
-  await browser.storage.local.set({ [`pendingApply:${urlKey}`]: versionId });
-  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id !== undefined) await browser.tabs.update(tab.id, { url: urlKey });
-}
+import { UserPlus, UserCheck, MoreVertical } from 'lucide-react';
+import { Api, type FeedItem } from '../../../lib/api.js';
+import { applyVersionAnywhere } from '../../../lib/apply.js';
+import { shareVersion } from '../../../lib/share.js';
+import { PanelHeader } from './PanelHeader.js';
+import { VersionRow } from './VersionRow.js';
 
 interface ProfileData {
   user: { id: string; handle: string };
-  modifications: Array<{ versionId: string; urlKey: string; name: string; createdAt: string }>;
+  modifications: FeedItem[];
   relationship: { following: boolean; muted: boolean; blocked: boolean };
 }
 
-export function Profile({ userId, onClose }: { userId: string; onClose: () => void }): React.JSX.Element {
+interface Props {
+  userId: string;
+  currentPageKey: string | null;
+  onClose: () => void;
+  onOpenProfile: (userId: string) => void;
+  onOpenComments: (versionId: string) => void;
+}
+
+export function Profile({ userId, currentPageKey, onClose, onOpenProfile, onOpenComments }: Props): React.JSX.Element {
   const [data, setData] = useState<ProfileData | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    void Api.getProfile(userId).then(setData).catch(() => setData(null));
+    setMenuOpen(false);
+    void Api.getProfile(userId).then((d) => setData(d as unknown as ProfileData)).catch(() => setData(null));
   }, [userId]);
 
   if (!data) return <div className="list">Loading…</div>;
-
   const rel = data.relationship;
 
-  /** Toggle a relationship and refresh from the server. */
+  /** Toggle a relationship and refresh the profile. */
   const toggle = async (kind: 'follow' | 'mute' | 'block', on: boolean) => {
     await Api[kind](userId, on);
-    const fresh = await Api.getProfile(userId);
-    setData(fresh);
+    setData((await Api.getProfile(userId)) as unknown as ProfileData);
+  };
+
+  // Row actions (mirror the feed) operating on the local modifications list.
+  const setMods = (fn: (xs: FeedItem[]) => FeedItem[]) => setData((d) => (d ? { ...d, modifications: fn(d.modifications) } : d));
+  const onVote = async (v: FeedItem, value: 1 | -1) => {
+    const tally = await Api.vote(v.id, value).catch(() => null);
+    if (tally) setMods((xs) => xs.map((x) => (x.id === v.id ? { ...x, ...tally } : x)));
+  };
+  const onToggleBookmark = async (v: FeedItem) => {
+    const on = !v.bookmarked;
+    await Api.toggleBookmark(v.id, on).catch(() => {});
+    setMods((xs) => xs.map((x) => (x.id === v.id ? { ...x, bookmarked: on } : x)));
   };
 
   return (
     <div className="list">
-      <h2>u/{data.user.handle}</h2>
-      <div className="row" style={{ gap: 6, marginBottom: 10 }}>
-        <button className={`btn ${rel.following ? 'primary' : ''}`} onClick={() => toggle('follow', !rel.following)}>
-          {rel.following ? 'Following' : 'Follow'}
-        </button>
-        <button className="btn" onClick={() => toggle('mute', !rel.muted)}>
-          {rel.muted ? 'Unmute' : 'Mute'}
-        </button>
-        <button className="btn" onClick={() => toggle('block', !rel.blocked)}>
-          {rel.blocked ? 'Unblock' : 'Block'}
-        </button>
-      </div>
-      <h3 className="muted">Modifications</h3>
-      {data.modifications.map((m) => (
-        <div
-          className="card card-link"
-          key={m.versionId}
-          role="button"
-          title="Open this page with this modification applied"
-          onClick={() => openWithVersion(m.urlKey, m.versionId)}
-        >
-          <div className="version-title">
-            {m.name} <ExternalLink size={11} style={{ verticalAlign: 'middle' }} />
-          </div>
-          <div className="muted">
-            {m.urlKey} · {new Date(m.createdAt).toLocaleDateString()}
-          </div>
+      <PanelHeader
+        title={
+          <span className="profile-name">
+            u/{data.user.handle}
+            <button
+              className={`icon-btn ${rel.following ? 'active' : ''}`}
+              title={rel.following ? 'Following' : 'Follow'}
+              onClick={() => toggle('follow', !rel.following)}
+            >
+              {rel.following ? <UserCheck size={16} /> : <UserPlus size={16} />}
+            </button>
+          </span>
+        }
+        onClose={onClose}
+      >
+        <div className="kebab">
+          <button className="icon-btn" aria-label="More" title="More" onClick={() => setMenuOpen((o) => !o)}>
+            <MoreVertical size={16} />
+          </button>
+          {menuOpen && (
+            <div className="kebab-menu" onMouseLeave={() => setMenuOpen(false)}>
+              <button className="kebab-item" onClick={() => toggle('mute', !rel.muted)}>
+                {rel.muted ? 'Unmute' : 'Mute'}
+              </button>
+              <button className="kebab-item" onClick={() => toggle('block', !rel.blocked)}>
+                {rel.blocked ? 'Unblock' : 'Block'}
+              </button>
+            </div>
+          )}
         </div>
+      </PanelHeader>
+
+      {data.modifications.map((v) => (
+        <VersionRow
+          key={v.id}
+          version={v}
+          onApply={(x) => void applyVersionAnywhere(x.id, x.page.urlKey, currentPageKey)}
+          onVote={onVote}
+          onOpenProfile={onOpenProfile}
+          onOpenComments={(x) => onOpenComments(x.id)}
+          onToggleBookmark={onToggleBookmark}
+          onShare={(x) => void shareVersion(x.page.urlKey, x.id, x.name)}
+        />
       ))}
       {data.modifications.length === 0 && <p className="muted">No modifications yet.</p>}
-      <button className="btn" style={{ marginTop: 10 }} onClick={onClose}>
-        Close
-      </button>
     </div>
   );
 }

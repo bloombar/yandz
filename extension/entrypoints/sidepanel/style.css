@@ -4,21 +4,43 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .app { display: flex; flex-direction: column; height: 100vh; }
 .header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #8883; }
 .header h1 { font-size: 14px; margin: 0; flex: 1; }
-.tabs { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid #8883; }
-.tab { border: none; background: transparent; padding: 4px 8px; border-radius: 6px; cursor: pointer; font: inherit; }
-.tab[aria-selected="true"] { background: #4c9ffe; color: #fff; }
-.list { flex: 1; overflow: auto; padding: 8px 12px; }
+/* Tabs: underline-style, not buttons. */
+.tabs { display: flex; gap: 16px; padding: 6px 12px 0; border-bottom: 1px solid #8883; }
+.tab { border: none; background: transparent; padding: 6px 2px; cursor: pointer; font: inherit; color: #8889; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tab[aria-selected="true"] { color: inherit; border-bottom-color: #4c9ffe; font-weight: 600; }
+/* All ↔ This page scope toggle (pills). */
+.scope-toggle { display: flex; gap: 6px; padding: 8px 12px 0; }
+.pill { border: 1px solid #8884; background: transparent; border-radius: 999px; padding: 2px 10px; cursor: pointer; font: 11px system-ui; color: #8889; }
+.pill.active { background: #4c9ffe; color: #fff; border-color: transparent; }
+.list { flex: 1; overflow: auto; padding: 0 0 8px; }
 .card { border: 1px solid #8883; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
 .card .row { display: flex; align-items: center; gap: 8px; }
-.card-link { cursor: pointer; }
-.card-link:hover { border-color: #4c9ffe; background: #4c9ffe11; }
 .handle { color: #4c9ffe; cursor: pointer; }
 .muted { color: #8889; }
-.votes { display: flex; align-items: center; gap: 4px; }
-.votes-right { flex-direction: column; gap: 2px; margin-left: 8px; }
 .version-title { font-weight: 600; color: #4c9ffe; cursor: pointer; }
 .version-title:hover { text-decoration: underline; }
 .version-title[aria-pressed="true"] { color: #2ecc71; }
+
+/* Compact, row-like feed item: bottom border only, no card chrome. */
+.version-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #8883; }
+.version-row-main { flex: 1; min-width: 0; }
+.version-row-main > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-ref { font-size: 11px; }
+.row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.votes { display: flex; align-items: center; gap: 2px; }
+/* Icon buttons (nav tools, row actions, close, kebab). */
+.icon-btn { display: inline-flex; align-items: center; gap: 3px; border: none; background: transparent; color: inherit; padding: 3px; border-radius: 6px; cursor: pointer; font: inherit; }
+.icon-btn:hover { background: #8881; }
+.icon-btn.active { color: #4c9ffe; }
+.icon-btn .count { font-size: 11px; color: #8889; }
+/* Panel header with top-right close icon. */
+.panel-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #8883; }
+.profile-name { display: inline-flex; align-items: center; gap: 4px; }
+/* Kebab menu. */
+.kebab { position: relative; }
+.kebab-menu { position: absolute; right: 0; top: 100%; background: Canvas; border: 1px solid #8884; border-radius: 6px; box-shadow: 0 2px 8px #0004; z-index: 10; min-width: 120px; }
+.kebab-item { display: block; width: 100%; text-align: left; border: none; background: transparent; padding: 8px 12px; cursor: pointer; font: inherit; color: inherit; }
+.kebab-item:hover { background: #8881; }
 .btn { border: 1px solid #8884; background: transparent; border-radius: 6px; padding: 3px 8px; cursor: pointer; font: inherit; }
 .btn:hover { background: #8881; }
 .btn.primary { background: #4c9ffe; color: #fff; border-color: transparent; }
