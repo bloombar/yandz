@@ -63,10 +63,11 @@ export function Profile({ userId, currentPageKey, onClose, onOpenProfile, onOpen
             u/{data.user.handle}
             <button
               className={`icon-btn ${rel.following ? 'active' : ''}`}
-              title={rel.following ? 'Following' : 'Follow'}
+              title={rel.following ? 'Unfollow' : 'Follow'}
               onClick={() => toggle('follow', !rel.following)}
             >
               {rel.following ? <UserCheck size={16} /> : <UserPlus size={16} />}
+              {rel.following && <span className="follow-label">Following</span>}
             </button>
           </span>
         }

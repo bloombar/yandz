@@ -45,6 +45,7 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 /* Panel header with top-right close icon. */
 .panel-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #8883; }
 .profile-name { display: inline-flex; align-items: center; gap: 4px; }
+.follow-label { font-size: 12px; font-weight: 600; }
 /* Kebab menu. */
 .kebab { position: relative; }
 .kebab-menu { position: absolute; right: 0; top: 100%; background: Canvas; border: 1px solid #8884; border-radius: 6px; box-shadow: 0 2px 8px #0004; z-index: 10; min-width: 120px; }
