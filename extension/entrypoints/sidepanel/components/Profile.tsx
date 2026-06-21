@@ -9,14 +9,16 @@ import { browser } from 'wxt/browser';
 import { Api } from '../../../lib/api.js';
 
 /**
- * Open a page in a new tab with a specific version queued to auto-apply. We stash
- * the target versionId under a per-urlKey storage flag; the content script reads
- * and clears it on load (see entrypoints/content.ts), applying that version even
- * without prior consent — the click is an explicit request to view this mod.
+ * Navigate the CURRENT tab to a page with a specific version queued to auto-apply
+ * (no new tab). We stash the target versionId under a per-urlKey storage flag; the
+ * content script reads and clears it on load (see entrypoints/content.ts), applying
+ * that version even without prior consent — the click is an explicit request to
+ * view this mod.
  */
 async function openWithVersion(urlKey: string, versionId: string): Promise<void> {
   await browser.storage.local.set({ [`pendingApply:${urlKey}`]: versionId });
-  await browser.tabs.create({ url: urlKey });
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id !== undefined) await browser.tabs.update(tab.id, { url: urlKey });
 }
 
 interface ProfileData {
