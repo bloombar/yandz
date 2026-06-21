@@ -9,7 +9,7 @@
  * After sign-in it asks the background SW to register for push, and reflects the
  * per-origin auto-apply consent in a banner.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Settings as SettingsIcon } from 'lucide-react';
 import { browser } from 'wxt/browser';
 import { Api, getToken, setToken, type VersionSummary, type PublicUser } from '../../lib/api.js';
@@ -53,8 +53,16 @@ export function App(): React.JSX.Element {
     void getToken().then((t) => setAuthed(!!t));
   }, []);
 
+  // Tracks the last URL we loaded, so a tab/page change clears the applied-version
+  // selection (the applied modification is page-specific).
+  const lastUrlRef = useRef<string | undefined>(undefined);
+
   const refresh = useCallback(async () => {
     const tab = await getActiveTab();
+    if (tab.url !== lastUrlRef.current) {
+      lastUrlRef.current = tab.url;
+      setSelectedId(null);
+    }
     setUrl(tab.url);
     if (!tab.url) return;
     try {
@@ -118,15 +126,20 @@ export function App(): React.JSX.Element {
             ← Back
           </button>
         )}
+        {/* Edit is always available (except while already editing). If a modification
+            is currently applied, Edit forks it; otherwise it starts a new version. */}
+        {view.name !== 'editor' && (
+          <button
+            className="btn"
+            onClick={() => setView({ name: 'editor', baseVersionId: selectedId ?? undefined })}
+          >
+            {selectedId ? 'Edit (fork)' : 'Edit'}
+          </button>
+        )}
         {view.name === 'versions' && (
-          <>
-            <button className="btn" onClick={() => setView({ name: 'editor' })}>
-              Edit
-            </button>
-            <button className="btn" aria-label="Settings" onClick={() => setView({ name: 'settings' })}>
-              <SettingsIcon size={14} />
-            </button>
-          </>
+          <button className="btn" aria-label="Settings" onClick={() => setView({ name: 'settings' })}>
+            <SettingsIcon size={14} />
+          </button>
         )}
       </header>
 
@@ -164,11 +177,16 @@ export function App(): React.JSX.Element {
               versions={versions}
               selectedId={selectedId}
               onVote={onVote}
-              onApply={(v) => messageTab({ type: 'yandz:apply-version', versionId: v.id })}
-              onRevert={() => messageTab({ type: 'yandz:revert' })}
+              onApply={(v) => {
+                setSelectedId(v.id);
+                void messageTab({ type: 'yandz:apply-version', versionId: v.id });
+              }}
+              onRevert={() => {
+                setSelectedId(null);
+                void messageTab({ type: 'yandz:revert' });
+              }}
               onOpenProfile={(userId) => setView({ name: 'profile', userId })}
               onOpenComments={(v) => setView({ name: 'comments', versionId: v.id })}
-              onFork={(v) => setView({ name: 'editor', baseVersionId: v.id })}
             />
             {versions.length === 0 && <p className="muted">No modifications yet for this page.</p>}
           </div>

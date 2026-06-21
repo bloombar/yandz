@@ -2,23 +2,23 @@
  * The ranked list of versions for the current page. Each card shows the
  * modification title (click it to APPLY that version to the live page) and the
  * author (u/handle → profile) on the left, with the up/down vote control and net
- * score on the right. A secondary row offers Fork and the comment board. Revert
- * restores the original page.
+ * score on the right. A secondary row opens the comment board. Revert restores the
+ * original page. The currently-applied version is controlled by `selectedId`
+ * (owned by App), which also drives the header's "Edit (fork)" behavior.
  */
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { ChevronUp, ChevronDown, MessageSquare, GitFork, Check } from 'lucide-react';
 import type { VersionSummary } from '../../../lib/api.js';
 
 interface Props {
   versions: VersionSummary[];
-  /** Version to show pre-selected/applied (e.g. just after saving). */
+  /** The currently-applied version id (null = original page). Owned by App. */
   selectedId?: string | null;
   onVote: (v: VersionSummary, value: 1 | -1) => void;
   onApply: (v: VersionSummary) => void;
   onRevert: () => void;
   onOpenProfile: (userId: string) => void;
   onOpenComments: (v: VersionSummary) => void;
-  onFork: (v: VersionSummary) => void;
 }
 
 export function VersionList({
@@ -29,24 +29,16 @@ export function VersionList({
   onRevert,
   onOpenProfile,
   onOpenComments,
-  onFork,
 }: Props): React.JSX.Element {
-  const [activeId, setActiveId] = useState<string | null>(selectedId ?? null);
-
-  // Reflect an externally-selected version (e.g. the one just saved).
-  useEffect(() => {
-    if (selectedId) setActiveId(selectedId);
-  }, [selectedId]);
-
   return (
     <div>
-      {activeId && (
-        <button className="btn" style={{ marginBottom: 8 }} onClick={() => { setActiveId(null); onRevert(); }}>
+      {selectedId && (
+        <button className="btn" style={{ marginBottom: 8 }} onClick={onRevert}>
           Revert to original
         </button>
       )}
       {versions.map((v) => {
-        const active = activeId === v.id;
+        const active = v.id === selectedId;
         return (
           <div className="card" key={v.id}>
             <div className="row">
@@ -57,7 +49,7 @@ export function VersionList({
                   role="button"
                   aria-pressed={active}
                   title="Apply this modification to the page"
-                  onClick={() => { setActiveId(v.id); onApply(v); }}
+                  onClick={() => onApply(v)}
                 >
                   {active && <Check size={12} style={{ verticalAlign: 'middle' }} />} {v.name}
                 </div>
@@ -86,9 +78,6 @@ export function VersionList({
               </div>
             </div>
             <div className="row" style={{ marginTop: 8 }}>
-              <button className="btn" onClick={() => onFork(v)} title="Fork this version">
-                <GitFork size={12} /> Fork
-              </button>
               <button
                 className="btn"
                 onClick={() => onOpenComments(v)}
