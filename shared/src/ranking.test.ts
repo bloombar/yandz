@@ -2,9 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   hotBase,
   wilson,
-  rankForViewer,
+  feedRank,
   sortVersions,
   FOLLOW_BOOST,
+  QUALITY_WEIGHT,
   EPOCH_MS,
   type Rankable,
 } from './ranking.js';
@@ -45,38 +46,60 @@ describe('wilson', () => {
   });
 });
 
-describe('rankForViewer', () => {
-  it('adds FOLLOW_BOOST when the viewer follows the author', () => {
-    expect(rankForViewer(2, true)).toBe(2 + FOLLOW_BOOST);
-    expect(rankForViewer(2, false)).toBe(2);
+describe('feedRank', () => {
+  const NOW = EPOCH_MS + 1_000_000_000; // a fixed "now" for determinism
+  const item = (wilsonScore: number, createdAtMs: number): Rankable => ({
+    hotScore: 0,
+    wilsonScore,
+    createdAtMs,
+    authorId: 'x',
+  });
+
+  it('weights vote quality', () => {
+    expect(feedRank(item(0.9, NOW), false, NOW)).toBeGreaterThan(feedRank(item(0.1, NOW), false, NOW));
+  });
+
+  it('adds FOLLOW_BOOST when following the author', () => {
+    expect(feedRank(item(0.5, NOW), true, NOW) - feedRank(item(0.5, NOW), false, NOW)).toBeCloseTo(FOLLOW_BOOST);
+  });
+
+  it('quality can outweigh recency (unlike "latest")', () => {
+    const oldButLoved = item(1, NOW - 20 * 86_400_000); // 20 days old, top quality
+    const freshNoVotes = item(0, NOW); // brand new, no votes
+    expect(feedRank(oldButLoved, false, NOW)).toBeGreaterThan(feedRank(freshNoVotes, false, NOW));
+    expect(QUALITY_WEIGHT).toBeGreaterThan(1);
   });
 });
 
 describe('sortVersions', () => {
+  const NOW = EPOCH_MS + 1_000_000_000;
+  // newest = a, then c, then b; but b has the best votes.
   const base: Rankable[] = [
-    { hotScore: 1, wilsonScore: 0.9, createdAtMs: 300, authorId: 'a' },
-    { hotScore: 2, wilsonScore: 0.5, createdAtMs: 100, authorId: 'b' },
-    { hotScore: 0.5, wilsonScore: 0.7, createdAtMs: 200, authorId: 'c' },
+    { hotScore: 0, wilsonScore: 0.0, createdAtMs: NOW - 1_000, authorId: 'a' },
+    { hotScore: 0, wilsonScore: 0.9, createdAtMs: NOW - 3_000, authorId: 'b' },
+    { hotScore: 0, wilsonScore: 0.0, createdAtMs: NOW - 2_000, authorId: 'c' },
   ];
 
-  it('foryou: orders by personalized hot score by default', () => {
-    const out = sortVersions(base, 'foryou', new Set());
-    expect(out.map((v) => v.authorId)).toEqual(['b', 'a', 'c']);
-  });
-
-  it('foryou: follow-boost can lift a followed author above a higher base score', () => {
-    const out = sortVersions(base, 'foryou', new Set(['a']));
-    expect(out[0]!.authorId).toBe('a'); // 1 + 1.5 = 2.5 > 2
-  });
-
-  it('latest: orders by recency', () => {
-    const out = sortVersions(base, 'latest', new Set());
+  it('latest: strict reverse-chronological', () => {
+    const out = sortVersions(base, 'latest', new Set(), NOW);
     expect(out.map((v) => v.authorId)).toEqual(['a', 'c', 'b']);
+  });
+
+  it('foryou: differs from latest — the well-voted version rises to the top', () => {
+    const out = sortVersions(base, 'foryou', new Set(), NOW);
+    expect(out[0]!.authorId).toBe('b'); // best votes, despite being oldest
+    expect(out.map((v) => v.authorId)).not.toEqual(['a', 'c', 'b']);
+  });
+
+  it('foryou: follow-boost lifts a followed author among similar-quality items', () => {
+    // b still tops on votes; among the two unvoted items, followed c beats newer a.
+    const out = sortVersions(base, 'foryou', new Set(['c']), NOW);
+    expect(out.map((v) => v.authorId)).toEqual(['b', 'c', 'a']);
   });
 
   it('does not mutate the input array', () => {
     const copy = [...base];
-    sortVersions(base, 'foryou', new Set());
+    sortVersions(base, 'foryou', new Set(), NOW);
     expect(base).toEqual(copy);
   });
 });

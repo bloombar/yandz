@@ -37,6 +37,8 @@ export interface FeedItem extends VersionSummary {
   bookmarked: boolean;
   /** The viewer's vote: 1 (up), -1 (down), or 0 (none). */
   myVote: 1 | -1 | 0;
+  /** Author of the version this was based on (for "based on u/x" links), or null. */
+  parentAuthor: { id: string; handle: string } | null;
 }
 
 export interface FeedResult {
@@ -132,10 +134,10 @@ export const Api = {
     ),
 
   createVersion: (input: { url: string; title?: string; name?: string; patches: AnyPatch[] }) =>
-    api<{ id: string }>('/versions', { method: 'POST', body: JSON.stringify(input) }),
+    api<{ id: string; name: string }>('/versions', { method: 'POST', body: JSON.stringify(input) }),
 
   forkVersion: (id: string, input: { url: string; name?: string; patches: AnyPatch[] }) =>
-    api<{ id: string; parentVersionId: string }>(`/versions/${id}/fork`, {
+    api<{ id: string; name: string; parentVersionId: string }>(`/versions/${id}/fork`, {
       method: 'POST',
       body: JSON.stringify(input),
     }),

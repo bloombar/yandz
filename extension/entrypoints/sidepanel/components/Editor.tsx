@@ -37,6 +37,8 @@ type EditorMessage = PickedMessage | DrawMessage | TextEditedMessage;
 interface Props {
   url: string;
   baseVersionId?: string;
+  /** Handle of the base version's author, shown in the header ("Based on u/x's"). */
+  baseAuthorHandle?: string;
   /** Tool to auto-start on mount, when launched from a top-nav tool icon. */
   initialTool?: 'pick' | 'draw';
   /** Returns false when the content script isn't reachable on the active tab. */
@@ -46,7 +48,15 @@ interface Props {
   onClose: () => void;
 }
 
-export function Editor({ url, baseVersionId, initialTool, messageTab, onSaved, onClose }: Props): React.JSX.Element {
+export function Editor({
+  url,
+  baseVersionId,
+  baseAuthorHandle,
+  initialTool,
+  messageTab,
+  onSaved,
+  onClose,
+}: Props): React.JSX.Element {
   const [patches, setPatches] = useState<AnyPatch[]>([]);
   const [picked, setPicked] = useState<PickedMessage | null>(null);
   const [name, setName] = useState('');
@@ -114,17 +124,23 @@ export function Editor({ url, baseVersionId, initialTool, messageTab, onSaved, o
     setError(null);
     try {
       const patchSet = patchesRef.current;
-      const vName = nameRef.current || (baseVersionId ? 'Fork' : 'My version');
+      // Send the name only if the user typed one; the server auto-generates a
+      // random two-word name otherwise.
+      const vName = nameRef.current.trim() || undefined;
       if (versionIdRef.current == null) {
         const res = baseVersionId
           ? await Api.forkVersion(baseVersionId, { url, name: vName, patches: patchSet })
           : await Api.createVersion({ url, name: vName, patches: patchSet });
         versionIdRef.current = res.id;
+        // Show the server's (possibly auto-generated) name so the user can see and
+        // edit it. Doesn't mark dirty, so it won't trigger another save by itself.
+        if (!nameRef.current.trim() && res.name) setName(res.name);
       } else {
         await Api.updateVersion(versionIdRef.current, { name: vName, patches: patchSet });
       }
       setLastSavedAt(Date.now());
       setStatus('saved');
+      dirtyRef.current = false; // saved state is clean until the next user edit
     } catch (err) {
       setStatus('error');
       setError((err as Error).message);
@@ -149,6 +165,7 @@ export function Editor({ url, baseVersionId, initialTool, messageTab, onSaved, o
   /** Finish editing: flush any pending save, then return to the list with the
    *  version selected (or just close if nothing was ever saved). */
   const done = async () => {
+    void messageTab({ type: 'yandz:stop-tools' }); // tear down any active drawing layer
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -158,6 +175,30 @@ export function Editor({ url, baseVersionId, initialTool, messageTab, onSaved, o
     else onClose();
   };
 
+  /** Replace (or add) the drawing patch for a target — drawing auto-emits the FULL
+   *  stroke set repeatedly, so we update one patch rather than appending each time. */
+  const upsertDrawing = (target: ElementTarget, strokes: DrawingStroke[]) => {
+    dirtyRef.current = true;
+    setPatches((prev) => {
+      const sig = target.cssSelector ?? target.domPath ?? 'drawing';
+      const idx = prev.findIndex(
+        (p) => p.op === 'drawingOverlay' && (p.target.cssSelector ?? p.target.domPath ?? 'drawing') === sig,
+      );
+      const patch = {
+        op: 'drawingOverlay',
+        target,
+        payload: { strokes },
+        order: idx >= 0 ? prev[idx]!.order : prev.length,
+      } as AnyPatch;
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = patch;
+        return next;
+      }
+      return [...prev, patch];
+    });
+  };
+
   // Receive picks, in-place text edits, and drawings from the content script.
   useEffect(() => {
     const listener = (msg: EditorMessage) => {
@@ -165,8 +206,7 @@ export function Editor({ url, baseVersionId, initialTool, messageTab, onSaved, o
       else if (msg?.type === 'yandz:text-edited')
         // In-place edit already changed the page; stage the matching textReplace.
         addPatch({ op: 'textReplace', target: msg.target, payload: msg.payload });
-      else if (msg?.type === 'yandz:drawing-captured')
-        addPatch({ op: 'drawingOverlay', target: msg.target, payload: { strokes: msg.strokes } });
+      else if (msg?.type === 'yandz:drawing-captured') upsertDrawing(msg.target, msg.strokes);
     };
     browser.runtime.onMessage.addListener(listener as never);
     return () => browser.runtime.onMessage.removeListener(listener as never);
@@ -189,7 +229,10 @@ export function Editor({ url, baseVersionId, initialTool, messageTab, onSaved, o
   return (
     <div className="list">
       {/* The X flushes the pending auto-save, then returns to the list. */}
-      <PanelHeader title={baseVersionId ? 'Based on another version' : 'New version'} onClose={() => void done()} />
+      <PanelHeader
+        title={baseVersionId ? `Based on u/${baseAuthorHandle ?? 'another'}'s` : 'New version'}
+        onClose={() => void done()}
+      />
 
       <div className="panel-body">
         <p className="muted" style={{ marginTop: 0 }}>
@@ -208,7 +251,7 @@ export function Editor({ url, baseVersionId, initialTool, messageTab, onSaved, o
 
         <input
           style={{ marginTop: 8 }}
-          placeholder="Version name"
+          placeholder="Name (auto-generated if left blank)"
           value={name}
           onChange={(e) => {
             dirtyRef.current = true;

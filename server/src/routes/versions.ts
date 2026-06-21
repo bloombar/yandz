@@ -11,6 +11,7 @@ import { Page, Version } from '../models.js';
 import { requireAuth } from '../lib/auth.js';
 import { pageKey } from '../services/url.js';
 import { sanitizePatchList } from '../services/sanitize.js';
+import { generateVersionName } from '../services/naming.js';
 import { recomputeVersionScore } from '../services/scoring.js';
 import { notifyFollowersOfNewVersion } from '../services/webpush.js';
 import { emitNewVersion } from '../realtime/io.js';
@@ -71,7 +72,8 @@ async function createVersion(
   const created = await Version.create({
     pageId,
     authorId: new Types.ObjectId(req.userId!),
-    name: body.data.name ?? 'Untitled version',
+    // Auto-generate a friendly two-word name when the user didn't provide one.
+    name: body.data.name?.trim() || generateVersionName(),
     patches: clean.patches,
     parentVersionId: opts.parent?._id ?? null,
     // rootVersionId points at the lineage root; self for an original version.
@@ -99,6 +101,7 @@ async function createVersion(
 
   res.status(201).json({
     id: String(created._id),
+    name: created.name, // the (possibly auto-generated) name, so the client can show it
     parentVersionId: created.parentVersionId ? String(created.parentVersionId) : null,
     rootVersionId: String(created.rootVersionId),
   });

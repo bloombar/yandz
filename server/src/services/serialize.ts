@@ -7,7 +7,7 @@
  * bookmark lookups so a list costs a constant number of queries.
  */
 import { Types } from 'mongoose';
-import { User, Page, Bookmark, Vote } from '../models.js';
+import { User, Page, Bookmark, Vote, Version } from '../models.js';
 
 /** Minimal shape we need off a lean Version doc. */
 export interface RawVersion {
@@ -32,6 +32,8 @@ export interface SerializedVersion {
   page: { urlKey: string; title: string };
   patches: unknown[];
   parentVersionId: string | null;
+  /** Author of the version this one was based on (for "based on u/x" links), or null. */
+  parentAuthor: { id: string; handle: string } | null;
   up: number;
   down: number;
   hotScore: number;
@@ -53,7 +55,19 @@ export async function serializeVersions(
 ): Promise<SerializedVersion[]> {
   if (versions.length === 0) return [];
 
-  const authorIds = [...new Set(versions.map((v) => String(v.authorId)))];
+  // Resolve the authors of parent versions (for "based on u/x" attribution).
+  const parentIds = versions.map((v) => v.parentVersionId).filter(Boolean) as Array<Types.ObjectId | string>;
+  const parentVersions = parentIds.length
+    ? await Version.find({ _id: { $in: parentIds } }).select('authorId').lean()
+    : [];
+  const parentAuthorByParentId = new Map(parentVersions.map((pv) => [String(pv._id), String(pv.authorId)]));
+
+  const authorIds = [
+    ...new Set([
+      ...versions.map((v) => String(v.authorId)),
+      ...parentVersions.map((pv) => String(pv.authorId)),
+    ]),
+  ];
   const pageIds = [...new Set(versions.map((v) => String(v.pageId)))];
 
   const versionIds = versions.map((v) => v._id);
@@ -73,13 +87,20 @@ export async function serializeVersions(
   const bookmarked = new Set(bookmarks.map((b) => String(b.versionId)));
   const voteByVersion = new Map(votes.map((vt) => [String(vt.versionId), vt.value as 1 | -1]));
 
-  return versions.map((v) => ({
+  return versions.map((v) => {
+    const parentAuthorId = v.parentVersionId
+      ? parentAuthorByParentId.get(String(v.parentVersionId))
+      : undefined;
+    return {
     id: String(v._id),
     name: v.name,
     author: { id: String(v.authorId), handle: handleById.get(String(v.authorId)) ?? 'unknown' },
     page: pageById.get(String(v.pageId)) ?? { urlKey: '', title: '' },
     patches: v.patches,
     parentVersionId: v.parentVersionId ? String(v.parentVersionId) : null,
+    parentAuthor: parentAuthorId
+      ? { id: parentAuthorId, handle: handleById.get(parentAuthorId) ?? 'unknown' }
+      : null,
     up: v.up,
     down: v.down,
     hotScore: v.hotScore,
@@ -88,5 +109,6 @@ export async function serializeVersions(
     bookmarked: bookmarked.has(String(v._id)),
     myVote: voteByVersion.get(String(v._id)) ?? 0,
     createdAt: v.createdAt,
-  }));
+    };
+  });
 }

@@ -33,6 +33,7 @@ import { startPicker, hasOwnText } from '../lib/ui/picker.js';
 import { OverlayRenderer } from '../lib/ui/overlay-renderer.js';
 import { startDrawing } from '../lib/ui/draw-capture.js';
 import { startInlineEdit, isInlineEditing } from '../lib/ui/inline-edit.js';
+import { AUTOSAVE_DEBOUNCE_MS } from '../lib/config.js';
 
 /** Capture the editable state of a picked element so the panel can prefill an editor. */
 function elementSnapshot(el: Element): Record<string, unknown> {
@@ -53,6 +54,9 @@ export default defineContentScript({
     const engine = new PatchEngine();
     const overlay = new OverlayRenderer();
     let current: VersionSummary | null = null;
+    // Stops the active page-side tool (drawing), so it can be torn down when the
+    // editor closes or another tool starts.
+    let activeStop: (() => void) | null = null;
 
     // Per-origin consent key for the auto-apply gate.
     const consentKey = `consent:${location.origin}`;
@@ -121,7 +125,14 @@ export default defineContentScript({
           void browser.storage.local.set({ [consentKey]: true });
           if (data?.versions[0]) applyVersion(data.versions[0]);
           break;
+        case 'yandz:stop-tools':
+          // Editor closed (or switched away) — tear down any active drawing layer.
+          activeStop?.();
+          activeStop = null;
+          break;
         case 'yandz:start-picker':
+          activeStop?.(); // stop any active drawing first
+          activeStop = null;
           // Open the inspector. If the picked element has its own text, edit it
           // IN PLACE on the page and send the resulting textReplace patch. For
           // textless elements, fall back to the sidebar editor (CSS/attr/image).
@@ -146,10 +157,14 @@ export default defineContentScript({
           });
           break;
         case 'yandz:start-draw':
-          // Freehand draw over the page; on finish, send strokes anchored to <body>.
-          startDrawing({
+          // Freehand draw over the page. Strokes auto-emit after a pause (debounced)
+          // and on stop, anchored to <body>, so the drawing is saved without an
+          // explicit "finish" step.
+          activeStop?.(); // replace any prior drawing session
+          activeStop = startDrawing({
             color: msg.color,
-            onFinish: (strokes) => {
+            debounceMs: AUTOSAVE_DEBOUNCE_MS,
+            onStrokes: (strokes) => {
               if (strokes.length === 0) return;
               void browser.runtime.sendMessage({
                 type: 'yandz:drawing-captured',

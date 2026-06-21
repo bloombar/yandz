@@ -84,11 +84,15 @@ export function VersionRow({
           <span className="handle" onClick={() => onOpenProfile(v.author.id)}>
             u/{v.author.handle}
           </span>{' '}
-          · {new Date(v.createdAt).toLocaleDateString()}
-          {v.parentVersionId && (
+          · {new Date(v.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+          {v.parentAuthor && (
             <>
               {' '}
-              · <GitFork size={11} style={{ verticalAlign: 'middle' }} /> based on another
+              · <GitFork size={11} style={{ verticalAlign: 'middle' }} /> based on{' '}
+              <span className="handle" onClick={() => onOpenProfile(v.parentAuthor!.id)}>
+                u/{v.parentAuthor.handle}
+              </span>
+              ’s
             </>
           )}
         </div>

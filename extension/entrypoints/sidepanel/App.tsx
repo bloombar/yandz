@@ -30,7 +30,7 @@ type View =
   | { name: 'feed' }
   | { name: 'profile'; userId: string }
   | { name: 'comments'; version: FeedItem }
-  | { name: 'editor'; baseVersionId?: string; initialTool?: 'pick' | 'draw' }
+  | { name: 'editor'; baseVersionId?: string; baseAuthorHandle?: string; initialTool?: 'pick' | 'draw' }
   | { name: 'settings' };
 
 type TabKey = 'foryou' | 'latest' | 'bookmarks';
@@ -198,7 +198,15 @@ export function App(): React.JSX.Element {
         tool === 'pick' ? { type: 'yandz:start-picker' } : { type: 'yandz:start-draw', color: '#e11' },
       );
     } else {
-      push({ name: 'editor', baseVersionId: selectedId ?? undefined, initialTool: tool });
+      // When a version is applied, the new version is "based on" it — carry its
+      // author handle so the editor header reads "Based on u/handle's".
+      const base = selectedId ? items.find((i) => i.id === selectedId) : undefined;
+      push({
+        name: 'editor',
+        baseVersionId: selectedId ?? undefined,
+        baseAuthorHandle: base?.author.handle,
+        initialTool: tool,
+      });
     }
   };
 
@@ -311,6 +319,7 @@ export function App(): React.JSX.Element {
         <Editor
           url={url}
           baseVersionId={view.baseVersionId}
+          baseAuthorHandle={view.baseAuthorHandle}
           initialTool={view.initialTool}
           messageTab={messageTab}
           onSaved={async (newId) => {

@@ -39,19 +39,27 @@ export function wilson(up: number, down: number): number {
   return Number(((center - margin) / denom).toFixed(7));
 }
 
+/** Weight on vote quality (Wilson score, 0..1) in the personalized feed rank. */
+export const QUALITY_WEIGHT = 3;
+/** Recency contributes 1 → 0 over this many days (a bounded freshness component). */
+export const RECENCY_WINDOW_DAYS = 30;
+const DAY_MS = 86_400_000;
+
 /**
- * Personalized "hot" rank for a specific viewer: the base hot score plus the
- * follow-boost when the viewer follows the author. The boost surfaces followed
- * authors without overriding strongly-voted versions.
+ * Personalized "For you" feed rank — deliberately NOT just recency, so it differs
+ * from "Latest". Blends vote quality (Wilson, weighted), a follow boost for authors
+ * the viewer follows, and a bounded recency term that fades over RECENCY_WINDOW_DAYS.
+ * Votes and follows therefore reorder the feed rather than time dominating it.
  */
-export function rankForViewer(hotScore: number, viewerFollowsAuthor: boolean): number {
-  return hotScore + (viewerFollowsAuthor ? FOLLOW_BOOST : 0);
+export function feedRank(item: Rankable, viewerFollowsAuthor: boolean, nowMs: number = Date.now()): number {
+  const ageDays = Math.max(0, (nowMs - item.createdAtMs) / DAY_MS);
+  const recency = Math.max(0, 1 - ageDays / RECENCY_WINDOW_DAYS);
+  return QUALITY_WEIGHT * item.wilsonScore + (viewerFollowsAuthor ? FOLLOW_BOOST : 0) + recency;
 }
 
 /**
  * The two feeds offered in the UI:
- *  - 'foryou' — personalized rank: time-decayed vote score plus a boost for authors
- *    the viewer follows.
+ *  - 'foryou' — personalized feed rank (vote quality + follow boost + recency).
  *  - 'latest' — strictly reverse-chronological.
  * Both are applied after block-filtering, which happens server-side.
  */
@@ -66,26 +74,26 @@ export interface Rankable {
 
 /**
  * Sort a list of versions for a given viewer & mode. `followedAuthorIds` is the
- * viewer's follow set (used only by 'foryou'). Returns a new, sorted array.
+ * viewer's follow set (used only by 'foryou'). `nowMs` is injectable for tests.
+ * Returns a new, sorted array.
  */
 export function sortVersions<T extends Rankable>(
   items: T[],
   mode: SortMode,
   followedAuthorIds: ReadonlySet<string>,
+  nowMs: number = Date.now(),
 ): T[] {
   const copy = [...items];
-  switch (mode) {
-    case 'latest':
-      copy.sort((a, b) => b.createdAtMs - a.createdAtMs);
-      break;
-    case 'foryou':
-    default:
-      copy.sort(
-        (a, b) =>
-          rankForViewer(b.hotScore, followedAuthorIds.has(b.authorId)) -
-          rankForViewer(a.hotScore, followedAuthorIds.has(a.authorId)),
-      );
-      break;
+  if (mode === 'latest') {
+    copy.sort((a, b) => b.createdAtMs - a.createdAtMs);
+  } else {
+    // 'foryou': rank by feed score; break ties by recency.
+    copy.sort(
+      (a, b) =>
+        feedRank(b, followedAuthorIds.has(b.authorId), nowMs) -
+          feedRank(a, followedAuthorIds.has(a.authorId), nowMs) ||
+        b.createdAtMs - a.createdAtMs,
+    );
   }
   return copy;
 }
