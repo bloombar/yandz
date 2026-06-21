@@ -7,10 +7,14 @@
  * If `baseVersionId` is set, saving forks that version (recording attribution);
  * otherwise it creates a brand-new version.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { browser } from 'wxt/browser';
 import { Api } from '../../../lib/api.js';
+import { AUTOSAVE_DEBOUNCE_MS } from '../../../lib/config.js';
 import type { AnyPatch, ElementTarget, DrawingStroke } from '@yandz/shared';
+
+/** Auto-save lifecycle, surfaced as discrete status text near the Done button. */
+type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
 interface PickedMessage {
   type: 'yandz:element-picked';
@@ -42,11 +46,75 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
   const [patches, setPatches] = useState<AnyPatch[]>([]);
   const [picked, setPicked] = useState<PickedMessage | null>(null);
   const [name, setName] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<SaveStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+
+  // Refs so the debounced save reads the latest values and persists to ONE version
+  // for the whole editing session (create once, then update).
+  const versionIdRef = useRef<string | null>(null);
+  const savingRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const patchesRef = useRef(patches);
+  const nameRef = useRef(name);
+  patchesRef.current = patches;
+  nameRef.current = name;
 
   const addPatch = (p: Omit<AnyPatch, 'order'>) =>
     setPatches((prev) => [...prev, { ...p, order: prev.length } as AnyPatch]);
+
+  /**
+   * Persist the current patch set. The first call creates (or forks) the version;
+   * subsequent calls update that same version, so a debounced burst of edits
+   * collapses into one version rather than many.
+   */
+  const persist = useCallback(async () => {
+    if (savingRef.current || patchesRef.current.length === 0) return;
+    savingRef.current = true;
+    setStatus('saving');
+    setError(null);
+    try {
+      const patchSet = patchesRef.current;
+      const vName = nameRef.current || (baseVersionId ? 'Fork' : 'My version');
+      if (versionIdRef.current == null) {
+        const res = baseVersionId
+          ? await Api.forkVersion(baseVersionId, { url, name: vName, patches: patchSet })
+          : await Api.createVersion({ url, name: vName, patches: patchSet });
+        versionIdRef.current = res.id;
+      } else {
+        await Api.updateVersion(versionIdRef.current, { name: vName, patches: patchSet });
+      }
+      setStatus('saved');
+    } catch (err) {
+      setStatus('error');
+      setError((err as Error).message);
+    } finally {
+      savingRef.current = false;
+    }
+  }, [baseVersionId, url]);
+
+  // Debounced auto-save: every edit resets the timer; the version is persisted
+  // only after AUTOSAVE_DEBOUNCE_MS of inactivity (configurable).
+  useEffect(() => {
+    if (patches.length === 0) return;
+    setStatus('pending');
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => void persist(), AUTOSAVE_DEBOUNCE_MS);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [patches, name, persist]);
+
+  /** Finish editing: flush any pending save, then return to the list with the
+   *  version selected (or just close if nothing was ever saved). */
+  const done = async () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (patches.length > 0) await persist();
+    if (versionIdRef.current) onSaved(versionIdRef.current);
+    else onClose();
+  };
 
   // Receive picks, in-place text edits, and drawings from the content script.
   useEffect(() => {
@@ -76,28 +144,12 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
     });
   };
 
-  const save = async () => {
-    setError(null);
-    setSaving(true);
-    try {
-      const res = baseVersionId
-        ? await Api.forkVersion(baseVersionId, { url, name: name || 'Fork', patches })
-        : await Api.createVersion({ url, name: name || 'My version', patches });
-      // Hand the new id up so the panel returns to the list with it selected/applied.
-      onSaved(res.id);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <div className="list">
       <div className="row" style={{ marginBottom: 8 }}>
         <strong style={{ flex: 1 }}>{baseVersionId ? 'Fork & edit' : 'New version'}</strong>
         <button className="btn" onClick={onClose}>
-          Cancel
+          Close
         </button>
       </div>
 
@@ -125,21 +177,23 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
         value={name}
         onChange={(e) => setName(e.target.value)}
       />
-      {/* Make the "nothing to save" case explicit rather than a dead button. */}
       {patches.length === 0 && (
         <p className="muted" style={{ marginTop: 8 }}>
-          Pick an element and stage at least one change (e.g. “Replace text”) before saving.
+          Pick an element and stage at least one change (e.g. “Replace text”). Changes auto-save.
         </p>
       )}
       {error && <div className="error">{error}</div>}
-      <button
-        className="btn primary"
-        style={{ marginTop: 8 }}
-        disabled={patches.length === 0 || saving}
-        onClick={save}
-      >
-        {saving ? 'Saving…' : baseVersionId ? 'Save fork' : 'Save version'}
-      </button>
+      <div className="row" style={{ marginTop: 8, alignItems: 'center' }}>
+        <button className="btn primary" disabled={patches.length === 0} onClick={done}>
+          Done
+        </button>
+        {/* Discrete auto-save status next to the button. */}
+        <span className="muted save-status" aria-live="polite">
+          {status === 'saving' && 'Saving…'}
+          {status === 'saved' && 'All changes saved'}
+          {status === 'pending' && 'Editing…'}
+        </span>
+      </div>
     </div>
   );
 }

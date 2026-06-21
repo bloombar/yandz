@@ -232,7 +232,11 @@ export function App(): React.JSX.Element {
             setView({ name: 'versions' });
             await messageTab({ type: 'yandz:apply-version', versionId: newId });
           }}
-          onClose={() => setView({ name: 'versions' })}
+          onClose={() => {
+            // Auto-save may have already persisted a version; refresh so it shows.
+            setView({ name: 'versions' });
+            void refresh();
+          }}
         />
       )}
     </div>

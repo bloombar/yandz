@@ -136,7 +136,9 @@ What reloads automatically once the dev server is running:
 
 The dev server keeps `VITE_API_BASE` pointed at `http://localhost:4000`; override it
 (and `VITE_GOOGLE_CLIENT_ID` / `VITE_VAPID_PUBLIC_KEY` for Google sign-in and push) in
-an `extension/.env` file if needed.
+an `extension/.env` file if needed. The editor **auto-saves** the current version,
+debounced by `VITE_AUTOSAVE_DEBOUNCE_MS` (default `1500`) — edits made within that
+window of each other coalesce into the same version.
 
 ## Production install
 

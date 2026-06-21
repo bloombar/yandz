@@ -97,6 +97,10 @@ export const Api = {
       body: JSON.stringify(input),
     }),
 
+  // Replace an existing version's patch set (used by debounced auto-save).
+  updateVersion: (id: string, input: { name?: string; patches: AnyPatch[] }) =>
+    api<{ id: string }>(`/versions/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
+
   vote: (id: string, value: 1 | -1) =>
     api<{ up: number; down: number }>(`/versions/${id}/vote`, {
       method: 'POST',

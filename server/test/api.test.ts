@@ -98,6 +98,30 @@ describe('versions + sanitization', () => {
     expect(fork.body.parentVersionId).toBe(parentId);
     expect(fork.body.rootVersionId).toBe(parentId);
   });
+
+  it('updates a version (author only) — backs the debounced auto-save', async () => {
+    const author = await makeUser('quinn');
+    const other = await makeUser('rob');
+    const url = 'https://example.com/autosave';
+    const id = await makeVersion(author.token, url, 'orig');
+
+    const upd = await request(app)
+      .put(`/versions/${id}`)
+      .set(auth(author.token))
+      .send({ name: 'updated', patches: [samplePatch('updated text')] });
+    expect(upd.status).toBe(200);
+
+    const fetched = await request(app).get(`/versions/${id}`);
+    expect(fetched.body.name).toBe('updated');
+    expect(fetched.body.patches[0].payload.to).toBe('updated text');
+
+    // A non-author cannot update someone else's version.
+    const forbidden = await request(app)
+      .put(`/versions/${id}`)
+      .set(auth(other.token))
+      .send({ patches: [samplePatch('hijack')] });
+    expect(forbidden.status).toBe(403);
+  });
 });
 
 describe('voting', () => {

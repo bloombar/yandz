@@ -131,6 +131,43 @@ versionsRouter.post('/:id/fork', requireAuth, async (req, res) => {
   });
 });
 
+// PUT /versions/:id — replace a version's patch set (and optionally its name).
+// Used by the editor's debounced auto-save: rapid edits coalesce into one version
+// that is repeatedly updated rather than re-created. Author-only.
+versionsRouter.put('/:id', requireAuth, async (req, res) => {
+  if (!Types.ObjectId.isValid(req.params.id)) {
+    res.status(400).json({ error: 'bad id' });
+    return;
+  }
+  const updateSchema = z.object({ name: z.string().max(120).optional(), patches: z.array(patchInput).min(1) });
+  const body = updateSchema.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: 'invalid input', details: body.error.flatten() });
+    return;
+  }
+  const version = await Version.findById(req.params.id).select('authorId');
+  if (!version) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  // Only the author may edit their own version.
+  if (String(version.authorId) !== req.userId) {
+    res.status(403).json({ error: 'forbidden' });
+    return;
+  }
+  // Re-validate + sanitize on every update (never trust transit).
+  const clean = sanitizePatchList(body.data.patches as AnyPatch[]);
+  if (!clean.ok || !clean.patches) {
+    res.status(422).json({ error: 'patch rejected', reason: clean.reason });
+    return;
+  }
+  await Version.updateOne(
+    { _id: version._id },
+    { $set: { patches: clean.patches, ...(body.data.name ? { name: body.data.name } : {}) } },
+  );
+  res.json({ id: String(version._id) });
+});
+
 // GET /versions/:id — fetch a single version (used by the diff view / direct links).
 versionsRouter.get('/:id', async (req, res) => {
   if (!Types.ObjectId.isValid(req.params.id)) {
