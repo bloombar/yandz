@@ -48,6 +48,7 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
   const [picked, setPicked] = useState<PickedMessage | null>(null);
   const [name, setName] = useState('');
   const [status, setStatus] = useState<SaveStatus>('idle');
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
 
@@ -96,6 +97,7 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
       } else {
         await Api.updateVersion(versionIdRef.current, { name: vName, patches: patchSet });
       }
+      setLastSavedAt(Date.now());
       setStatus('saved');
     } catch (err) {
       setStatus('error');
@@ -203,9 +205,13 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
         </button>
         {/* Discrete auto-save status next to the button. */}
         <span className="muted save-status" aria-live="polite">
-          {status === 'saving' && 'Saving…'}
-          {status === 'saved' && 'All changes saved'}
-          {status === 'pending' && 'Editing…'}
+          {status === 'saving'
+            ? 'Auto-saving…'
+            : lastSavedAt
+              ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}`
+              : status === 'pending'
+                ? 'Editing…'
+                : ''}
         </span>
       </div>
     </div>
