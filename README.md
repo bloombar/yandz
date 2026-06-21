@@ -94,6 +94,50 @@ Then load the unpacked extension:
 Dev resources are isolated from anything else sharing your local servers:
 **Mongo database** `yandz_dev`, **MinIO bucket** `yandz-assets`.
 
+## Dev mode (live reload)
+
+For day-to-day development, run the WXT dev server instead of rebuilding by hand.
+WXT watches your source and pushes updates into the browser automatically, so you
+load the extension **once**.
+
+```bash
+# 1. (optional) Seed the dev DB with mock users, page versions, follows, votes.
+npm run seed --workspace=server     # 5 users (password: password123), 25 versions
+
+# 2. Start the API (auto-restarts on change via tsx watch).
+npm run dev:server                  # http://localhost:4000
+
+# 3. Start the extension dev server (HMR + auto-reload).
+npm run dev:ext                     # Chromium   → extension/output/chrome-mv3-dev
+npm run dev:ext:firefox             # Firefox     → extension/output/firefox-mv2-dev
+```
+
+Load the **dev** build once (note the `-dev` suffix):
+
+- **Chromium:** `chrome://extensions` → *Developer mode* → **Load unpacked** →
+  `extension/output/chrome-mv3-dev`.
+- **Firefox:** `npm run dev:ext:firefox` opens a browser with the add-on loaded
+  automatically (via `web-ext`); no manual step needed.
+
+> ⚠️ Don't load the production `output/chrome-mv3` folder for development — it isn't
+> watched, so every change would require a rebuild + manual reload. Use the `-dev`
+> build.
+
+What reloads automatically once the dev server is running:
+
+| You change… | What happens |
+|-------------|--------------|
+| **Side panel / React UI** | Hot Module Replacement — updates live, no reload (React state is preserved). |
+| **Content script** (engine, picker, overlay) | WXT reloads the extension; **refresh the web page** so the new content script re-injects. |
+| **Background service worker** | WXT reloads the extension automatically. |
+| **`shared/` code** | Bundled into the extension — picked up by the watcher like any source. |
+| **API / `server/` code** | `tsx watch` restarts the server; no extension reload needed. |
+| **`wxt.config.ts` / manifest** (permissions, entrypoints, icons) | Needs a **manual reload** in `chrome://extensions` (the ↻ button), and occasionally a fresh *Load unpacked*. |
+
+The dev server keeps `VITE_API_BASE` pointed at `http://localhost:4000`; override it
+(and `VITE_GOOGLE_CLIENT_ID` / `VITE_VAPID_PUBLIC_KEY` for Google sign-in and push) in
+an `extension/.env` file if needed.
+
 ## Production install
 
 ```bash
