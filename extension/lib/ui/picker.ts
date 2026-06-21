@@ -3,11 +3,54 @@
  * highlights the element under the cursor with an overlay box; clicking selects it
  * (and invokes the callback); Escape cancels. The overlay lives in its own fixed
  * layer and never intercepts the final click target's identity.
+ *
+ * Editable-target resolution: when the element directly under the cursor has no
+ * editable content of its own (no own text, no text-related attribute) — e.g. a
+ * wrapper div, or the padding area of a container — the picker drills into its
+ * descendants and resolves to the first one that DOES have editable text or a
+ * text-related attribute. This makes hovering a container select the meaningful
+ * text element inside it rather than an uneditable wrapper.
  */
 
 export type PickCallback = (element: Element) => void;
 
 const OVERLAY_ID = 'yandz-picker-overlay';
+
+/** Text-bearing attributes a user can edit (alt text, tooltips, labels, inputs). */
+const TEXT_ATTRS = ['alt', 'title', 'aria-label', 'placeholder', 'value'];
+
+/** True if the element has a direct (non-whitespace) text node of its own. */
+function hasOwnText(el: Element): boolean {
+  for (const node of Array.from(el.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '') return true;
+  }
+  return false;
+}
+
+/** True if the element carries a non-empty text-related attribute (or input value). */
+function hasTextAttr(el: Element): boolean {
+  if (el instanceof HTMLInputElement && el.value.trim() !== '') return true;
+  return TEXT_ATTRS.some((a) => (el.getAttribute(a) ?? '').trim() !== '');
+}
+
+/** An element is directly editable if it has own text or a text-related attribute. */
+function isEditableTarget(el: Element): boolean {
+  return hasOwnText(el) || hasTextAttr(el);
+}
+
+/**
+ * Resolve the element under the cursor to the best editable target: itself if it
+ * has editable content, otherwise the first descendant (document order) that does.
+ * Falls back to the original element when no editable descendant exists (so CSS /
+ * structural edits on textless elements are still possible).
+ */
+function resolveEditableTarget(el: Element): Element {
+  if (isEditableTarget(el)) return el;
+  for (const descendant of Array.from(el.querySelectorAll('*'))) {
+    if (isEditableTarget(descendant)) return descendant;
+  }
+  return el;
+}
 
 /** Begin picking. Returns a cancel function; auto-cancels after a pick. */
 export function startPicker(onPick: PickCallback): () => void {
@@ -18,7 +61,8 @@ export function startPicker(onPick: PickCallback): () => void {
     'background:rgba(76,159,254,.15);border-radius:2px;transition:all .03s;';
   document.documentElement.appendChild(overlay);
 
-  let hovered: Element | null = null;
+  // The raw element last seen under the cursor (to avoid recomputing every move).
+  let lastRaw: Element | null = null;
 
   /** Position the highlight box over an element's bounding rect. */
   function highlight(el: Element): void {
@@ -31,19 +75,19 @@ export function startPicker(onPick: PickCallback): () => void {
 
   function onMove(e: MouseEvent): void {
     // elementFromPoint ignores our pointer-events:none overlay.
-    const el = document.elementFromPoint(e.clientX, e.clientY);
-    if (el && el !== overlay && el !== hovered) {
-      hovered = el;
-      highlight(el);
-    }
+    const raw = document.elementFromPoint(e.clientX, e.clientY);
+    if (!raw || raw === overlay || raw === lastRaw) return;
+    lastRaw = raw;
+    // Highlight the resolved editable target, not necessarily the raw element.
+    highlight(resolveEditableTarget(raw));
   }
 
   function onClick(e: MouseEvent): void {
     e.preventDefault();
     e.stopPropagation();
-    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const raw = document.elementFromPoint(e.clientX, e.clientY);
     cleanup();
-    if (el) onPick(el);
+    if (raw) onPick(resolveEditableTarget(raw));
   }
 
   function onKey(e: KeyboardEvent): void {
