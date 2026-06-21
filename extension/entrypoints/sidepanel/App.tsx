@@ -40,6 +40,8 @@ export function App(): React.JSX.Element {
   const [sort, setSort] = useState<'hot' | 'top' | 'new'>('hot');
   const [view, setView] = useState<View>({ name: 'versions' });
   const [consented, setConsented] = useState(true);
+  // The version to highlight as selected in the list (e.g. just after saving).
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   /** Send a message to the content script in the active tab. */
   const messageTab = useCallback(async (payload: unknown) => {
@@ -151,6 +153,7 @@ export function App(): React.JSX.Element {
           <div className="list">
             <VersionList
               versions={versions}
+              selectedId={selectedId}
               onVote={onVote}
               onApply={(v) => messageTab({ type: 'yandz:apply-version', versionId: v.id })}
               onRevert={() => messageTab({ type: 'yandz:revert' })}
@@ -178,7 +181,13 @@ export function App(): React.JSX.Element {
           url={url}
           baseVersionId={view.baseVersionId}
           messageTab={messageTab}
-          onSaved={refresh}
+          onSaved={async (newId) => {
+            // Return to the list, refresh it, then select + apply the new version.
+            await refresh();
+            setSelectedId(newId);
+            setView({ name: 'versions' });
+            await messageTab({ type: 'yandz:apply-version', versionId: newId });
+          }}
           onClose={() => setView({ name: 'versions' })}
         />
       )}

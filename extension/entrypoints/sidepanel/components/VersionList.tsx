@@ -5,12 +5,14 @@
  * score on the right. A secondary row offers Fork and the comment board. Revert
  * restores the original page.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ChevronUp, ChevronDown, MessageSquare, GitFork, Check } from 'lucide-react';
 import type { VersionSummary } from '../../../lib/api.js';
 
 interface Props {
   versions: VersionSummary[];
+  /** Version to show pre-selected/applied (e.g. just after saving). */
+  selectedId?: string | null;
   onVote: (v: VersionSummary, value: 1 | -1) => void;
   onApply: (v: VersionSummary) => void;
   onRevert: () => void;
@@ -21,6 +23,7 @@ interface Props {
 
 export function VersionList({
   versions,
+  selectedId,
   onVote,
   onApply,
   onRevert,
@@ -28,7 +31,12 @@ export function VersionList({
   onOpenComments,
   onFork,
 }: Props): React.JSX.Element {
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(selectedId ?? null);
+
+  // Reflect an externally-selected version (e.g. the one just saved).
+  useEffect(() => {
+    if (selectedId) setActiveId(selectedId);
+  }, [selectedId]);
 
   return (
     <div>

@@ -27,7 +27,8 @@ interface Props {
   url: string;
   baseVersionId?: string;
   messageTab: (payload: unknown) => void;
-  onSaved: () => void;
+  /** Called with the new version's id after a successful save. */
+  onSaved: (newVersionId: string) => void;
   onClose: () => void;
 }
 
@@ -35,6 +36,7 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
   const [patches, setPatches] = useState<AnyPatch[]>([]);
   const [picked, setPicked] = useState<PickedMessage | null>(null);
   const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const addPatch = (p: Omit<AnyPatch, 'order'>) =>
@@ -67,13 +69,17 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
 
   const save = async () => {
     setError(null);
+    setSaving(true);
     try {
-      if (baseVersionId) await Api.forkVersion(baseVersionId, { url, name: name || 'Fork', patches });
-      else await Api.createVersion({ url, name: name || 'My version', patches });
-      onSaved();
-      onClose();
+      const res = baseVersionId
+        ? await Api.forkVersion(baseVersionId, { url, name: name || 'Fork', patches })
+        : await Api.createVersion({ url, name: name || 'My version', patches });
+      // Hand the new id up so the panel returns to the list with it selected/applied.
+      onSaved(res.id);
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -110,9 +116,20 @@ export function Editor({ url, baseVersionId, messageTab, onSaved, onClose }: Pro
         value={name}
         onChange={(e) => setName(e.target.value)}
       />
+      {/* Make the "nothing to save" case explicit rather than a dead button. */}
+      {patches.length === 0 && (
+        <p className="muted" style={{ marginTop: 8 }}>
+          Pick an element and stage at least one change (e.g. “Replace text”) before saving.
+        </p>
+      )}
       {error && <div className="error">{error}</div>}
-      <button className="btn primary" style={{ marginTop: 8 }} disabled={patches.length === 0} onClick={save}>
-        {baseVersionId ? 'Save fork' : 'Save version'}
+      <button
+        className="btn primary"
+        style={{ marginTop: 8 }}
+        disabled={patches.length === 0 || saving}
+        onClick={save}
+      >
+        {saving ? 'Saving…' : baseVersionId ? 'Save fork' : 'Save version'}
       </button>
     </div>
   );

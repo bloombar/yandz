@@ -86,9 +86,22 @@ export default defineContentScript({
     // Messages from the side panel: switch version, revert, grant consent, pick, draw.
     browser.runtime.onMessage.addListener((msg: any) => {
       switch (msg?.type) {
-        case 'yandz:apply-version':
-          applyVersion(data?.versions.find((v) => v.id === msg.versionId) ?? null);
+        case 'yandz:apply-version': {
+          const found = data?.versions.find((v) => v.id === msg.versionId);
+          if (found) {
+            applyVersion(found);
+          } else {
+            // A just-created version won't be in our cached list — re-fetch, then apply.
+            void Api.getVersionsForUrl(location.href)
+              .then((fresh) => {
+                data = fresh;
+                const v = fresh.versions.find((x) => x.id === msg.versionId);
+                if (v) applyVersion(v);
+              })
+              .catch(() => {});
+          }
           break;
+        }
         case 'yandz:revert':
           applyVersion(null);
           break;
