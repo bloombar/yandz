@@ -71,12 +71,28 @@ export function startInlineEdit(el: Element, handlers: InlineEditHandlers): void
     handlers.onEnd?.();
   }
 
-  // Enter commits (Shift+Enter inserts a newline); Escape cancels.
+  // Enter completes the edit; Shift/Ctrl/Cmd+Enter inserts a line break instead.
+  // Escape cancels.
   function onKey(e: KeyboardEvent): void {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter') {
       e.preventDefault();
       e.stopPropagation();
-      finish(true);
+      if (e.shiftKey || e.ctrlKey || e.metaKey) {
+        // Insert a newline (captured in textContent) rather than completing.
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          const nl = document.createTextNode('\n');
+          range.insertNode(nl);
+          range.setStartAfter(nl);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      } else {
+        finish(true);
+      }
     } else if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
@@ -84,22 +100,35 @@ export function startInlineEdit(el: Element, handlers: InlineEditHandlers): void
     }
   }
 
-  // Keep focus in the editor when the user presses on something outside it (so an
-  // outside click doesn't steal focus before we decide what to do with it).
+  // Retain focus only when pressing on an ANCESTOR (we want to stay in edit mode
+  // there). For a non-parent element we let the press behave normally so the
+  // following click cleanly commits the edit.
   function onMouseDown(e: MouseEvent): void {
-    if (!node.contains(e.target as Node)) e.preventDefault();
+    const t = e.target as Node;
+    if (!node.contains(t) && t instanceof Node && t.contains(node)) e.preventDefault();
   }
 
   // Lock navigation: swallow every click during the edit. Clicks inside the edited
-  // element or on its ancestors keep editing; any other click commits.
+  // element or on its ancestors keep editing; clicking any other (non-parent)
+  // element completes the edit.
   function onClick(e: MouseEvent): void {
     const target = e.target as Node;
+    if (node.contains(target)) {
+      // Inside the edited element → caret placement; block nested link nav.
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (target instanceof Node && target.contains(node)) {
+      // An ancestor/container → keep editing (block its nav).
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    // A non-parent element → complete the edit (and block its navigation).
     e.preventDefault();
     e.stopPropagation();
-    if (node.contains(target)) return; // inside the edited element → caret, keep editing
-    // An ancestor/container of the edited element → keep editing.
-    if (target instanceof Node && target.contains(node)) return;
-    finish(true); // a non-container element → commit
+    finish(true);
   }
 
   // Block link/JS navigation triggered other than by a plain click.

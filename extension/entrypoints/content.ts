@@ -202,11 +202,13 @@ export default defineContentScript({
           activeStop = startDrawing({
             color: msg.color,
             debounceMs: AUTOSAVE_DEBOUNCE_MS,
-            onStrokes: (strokes) => {
+            // The drawing is anchored to the element the user drew on; fingerprint it
+            // so the overlay renders relative to that element (tracking it on scroll).
+            onStrokes: (strokes, target) => {
               if (strokes.length === 0) return;
               void browser.runtime.sendMessage({
                 type: 'yandz:drawing-captured',
-                target: fingerprintElement(document.body),
+                target: fingerprintElement(target),
                 strokes,
               });
             },

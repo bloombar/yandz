@@ -1,33 +1,40 @@
 /**
- * Freehand drawing capture. Activates a transparent full-viewport layer that
- * intercepts pointer events and records strokes (stored as PERCENTAGES of the
- * viewport so they reposition responsively).
+ * Freehand drawing capture, anchored to a page ELEMENT (like text patches).
  *
- * Auto-save: after `debounceMs` of no drawing, the accumulated strokes are emitted
- * via onStrokes (and again on stop), so the in-progress drawing is saved into the
- * version without the user having to explicitly finish. The layer stays active so
- * the user can keep drawing; stop() (or Escape) tears it down with a final emit.
+ * Flow: while in draw mode the element under the cursor is highlighted (a transparent
+ * canvas captures pointer events, so we read the element beneath it with
+ * elementsFromPoint). On the first press, the drawing is locked to that target
+ * element; strokes are then recorded as PERCENTAGES of the target's bounding box, so
+ * the overlay renderer can re-draw them relative to that element later (tracking it
+ * as the page shifts). Strokes auto-emit after a debounce (and on stop).
  */
 import type { DrawingStroke } from '@yandz/shared';
 
 export interface DrawOptions {
   color?: string;
-  /** Stroke size as a fraction of viewport width. */
+  /** Stroke size as a fraction of the target's width. */
   sizePct?: number;
   /** Idle time before the current strokes are auto-emitted. */
   debounceMs?: number;
-  /** Called with ALL strokes so far on each idle tick and on stop. */
-  onStrokes: (strokes: DrawingStroke[]) => void;
+  /** Called with all strokes + the element they're anchored to, on idle and stop. */
+  onStrokes: (strokes: DrawingStroke[], target: Element) => void;
 }
 
 const LAYER_ID = 'yandz-draw-capture';
+const HILITE_ID = 'yandz-draw-highlight';
+
+/** Our own injected nodes — never valid draw targets. */
+function isOwnUi(el: Element | null): boolean {
+  return !!el && (/^yandz-/.test(el.id) || !!el.closest?.('[id^="yandz-"]'));
+}
 
 /** Begin freehand capture. Returns a stop() that finishes and cleans up. */
 export function startDrawing(opts: DrawOptions): () => void {
   const color = opts.color ?? '#e11';
-  const sizePct = opts.sizePct ?? 0.004;
+  const sizePct = opts.sizePct ?? 0.01;
   const debounceMs = opts.debounceMs ?? 1500;
 
+  // Transparent canvas that captures pointer input across the viewport.
   const layer = document.createElement('canvas');
   layer.id = LAYER_ID;
   layer.width = window.innerWidth;
@@ -36,49 +43,87 @@ export function startDrawing(opts: DrawOptions): () => void {
   document.documentElement.appendChild(layer);
   const cx = layer.getContext('2d')!;
   cx.strokeStyle = color;
-  cx.lineWidth = Math.max(2, sizePct * window.innerWidth);
   cx.lineCap = 'round';
   cx.lineJoin = 'round';
 
+  // Hover highlight (shown until the drawing is locked to an element).
+  const hilite = document.createElement('div');
+  hilite.id = HILITE_ID;
+  hilite.style.cssText =
+    'position:fixed;z-index:2147483645;pointer-events:none;border:2px solid #4c9ffe;' +
+    'background:rgba(76,159,254,.12);border-radius:2px;display:none;';
+  document.documentElement.appendChild(hilite);
+
   const strokes: DrawingStroke[] = [];
+  let target: Element | null = null; // locked on first press
+  let targetRect: DOMRect | null = null;
   let drawing = false;
   let pts: Array<[number, number, number?]> = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  /** Percentage-of-viewport coords for responsive storage. */
-  const toPct = (e: PointerEvent): [number, number, number] => [
-    (e.clientX / window.innerWidth) * 100,
-    (e.clientY / window.innerHeight) * 100,
-    e.pressure || 0.5,
-  ];
+  /** The topmost page element under a point (ignoring our own overlay/canvas). */
+  function elementUnder(x: number, y: number): Element | null {
+    for (const el of document.elementsFromPoint(x, y)) {
+      if (el !== layer && el !== hilite && !isOwnUi(el)) return el;
+    }
+    return null;
+  }
 
-  /** Emit the accumulated strokes after a period of no drawing. */
+  function showHighlight(el: Element): void {
+    const r = el.getBoundingClientRect();
+    hilite.style.display = 'block';
+    hilite.style.left = `${r.left}px`;
+    hilite.style.top = `${r.top}px`;
+    hilite.style.width = `${r.width}px`;
+    hilite.style.height = `${r.height}px`;
+  }
+
+  /** A point as a percentage of the (locked) target's bounding box. */
+  function toPct(e: PointerEvent): [number, number, number] {
+    const r = targetRect!;
+    return [((e.clientX - r.left) / r.width) * 100, ((e.clientY - r.top) / r.height) * 100, e.pressure || 0.5];
+  }
+
   function scheduleEmit(): void {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
-      if (strokes.length) opts.onStrokes([...strokes]);
+      if (strokes.length && target) opts.onStrokes([...strokes], target);
     }, debounceMs);
   }
 
+  const move = (e: PointerEvent) => {
+    if (drawing) {
+      pts.push(toPct(e));
+      cx.lineTo(e.clientX, e.clientY);
+      cx.stroke();
+    } else {
+      const el = elementUnder(e.clientX, e.clientY);
+      if (el) showHighlight(el);
+      else hilite.style.display = 'none';
+    }
+  };
+
   const down = (e: PointerEvent) => {
     if (timer) clearTimeout(timer);
+    // Lock the drawing to the element under the first press; reuse it thereafter.
+    if (!target) target = elementUnder(e.clientX, e.clientY);
+    if (!target) return;
+    targetRect = target.getBoundingClientRect(); // refresh each stroke (handles scroll)
+    hilite.style.display = 'none';
+    cx.lineWidth = Math.max(2, sizePct * targetRect.width);
     drawing = true;
     pts = [toPct(e)];
     cx.beginPath();
     cx.moveTo(e.clientX, e.clientY);
   };
-  const move = (e: PointerEvent) => {
-    if (!drawing) return;
-    pts.push(toPct(e));
-    cx.lineTo(e.clientX, e.clientY);
-    cx.stroke();
-  };
+
   const up = () => {
     if (!drawing) return;
     drawing = false;
     if (pts.length > 1) strokes.push({ points: pts, color, sizePct });
-    scheduleEmit(); // auto-save after this stroke if no further drawing
+    scheduleEmit();
   };
+
   const key = (e: KeyboardEvent) => {
     if (e.key === 'Escape') stop();
   };
@@ -95,7 +140,8 @@ export function startDrawing(opts: DrawOptions): () => void {
     layer.removeEventListener('pointerup', up);
     document.removeEventListener('keydown', key, true);
     layer.remove();
-    if (strokes.length) opts.onStrokes([...strokes]); // final save
+    hilite.remove();
+    if (strokes.length && target) opts.onStrokes([...strokes], target); // final save
   }
 
   return stop;
