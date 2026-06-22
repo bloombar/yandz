@@ -12,33 +12,12 @@ import { Trash2 } from 'lucide-react';
 import { browser } from 'wxt/browser';
 import { Api } from '../../../lib/api.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../../lib/config.js';
+import { describePatch } from '../../../lib/describe-patch.js';
 import { PanelHeader } from './PanelHeader.js';
 import type { AnyPatch, ElementTarget, DrawingStroke } from '@yandz/shared';
 
 /** Auto-save lifecycle, surfaced as discrete status text near the Done button. */
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
-
-const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}…` : s);
-
-/** Human-friendly summary of a change: a text preview, or a description of the op. */
-function describePatch(p: AnyPatch): string {
-  switch (p.op) {
-    case 'textReplace':
-      return `Text: “${clip(p.payload.to ?? '', 40)}”`;
-    case 'imageSwap':
-      return 'Image swap';
-    case 'cssOverride':
-      return 'Style change';
-    case 'attrChange':
-      return `Set ${p.payload.attr}`;
-    case 'drawingOverlay':
-      return 'Drawing overlay';
-    case 'annotation':
-      return p.payload.kind === 'highlight' ? 'Highlight' : `Note: “${clip(p.payload.body ?? '', 30)}”`;
-    default:
-      return (p as AnyPatch).op;
-  }
-}
 
 interface PickedMessage {
   type: 'yandz:element-picked';

@@ -26,6 +26,8 @@ interface Props {
   onToggleBookmark: (v: FeedItem) => void;
   onShare: (v: FeedItem) => void;
   onDelete: (v: FeedItem) => void;
+  /** Open the version's changes panel (editable if owned, read-only otherwise). */
+  onOpenChanges: (v: FeedItem) => void;
 }
 
 /** Middle-truncate a long URL so the host and tail stay visible. */
@@ -45,6 +47,7 @@ export function VersionRow({
   onToggleBookmark,
   onShare,
   onDelete,
+  onOpenChanges,
 }: Props): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const isAuthor = !!currentUserId && currentUserId === v.author.id;
@@ -106,7 +109,10 @@ export function VersionRow({
         <span className="version-name" role="button" onClick={() => onApply(v)}>
           {v.name}
         </span>{' '}
-        · <span className="url-text" role="button" onClick={() => onApply(v)}>{shortUrl(v.page.urlKey)}</span>
+        · <span className="url-text" role="button" onClick={() => onApply(v)}>{shortUrl(v.page.urlKey)}</span> ·{' '}
+        <span className="changes-link" role="button" title="View this version's changes" onClick={() => onOpenChanges(v)}>
+          {v.patches.length} change{v.patches.length === 1 ? '' : 's'}
+        </span>
       </div>
 
       {/* Bottom line: author/date (left) + votes (down · net · up), right-aligned

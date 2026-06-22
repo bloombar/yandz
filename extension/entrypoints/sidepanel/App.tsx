@@ -26,11 +26,13 @@ import { Profile } from './components/Profile.js';
 import { Comments } from './components/Comments.js';
 import { Editor } from './components/Editor.js';
 import { Settings } from './components/Settings.js';
+import { VersionChanges } from './components/VersionChanges.js';
 
 type View =
   | { name: 'feed' }
   | { name: 'profile'; userId: string }
   | { name: 'comments'; version: FeedItem }
+  | { name: 'changes'; version: FeedItem }
   | {
       name: 'editor';
       // Editing the viewer's OWN existing version (update it, no new version).
@@ -233,6 +235,12 @@ export function App(): React.JSX.Element {
     }
   };
 
+  /** View a version's changes: the editable editor if you own it, else read-only. */
+  const openChanges = (v: FeedItem) => {
+    if (currentUserId && v.author.id === currentUserId) push({ name: 'editor', editVersionId: v.id, editName: v.name });
+    else push({ name: 'changes', version: v });
+  };
+
   const grantConsent = async () => {
     if (isWebUrl(url)) {
       try {
@@ -374,6 +382,7 @@ export function App(): React.JSX.Element {
                 onToggleBookmark={onToggleBookmark}
                 onShare={onShare}
                 onDelete={onDelete}
+                onOpenChanges={openChanges}
               />
             ))}
             {items.length === 0 &&
@@ -392,8 +401,16 @@ export function App(): React.JSX.Element {
         </>
       )}
 
-      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(v) => push({ name: 'comments', version: v })} currentPageKey={currentPageKey} currentUserId={currentUserId} />}
+      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(v) => push({ name: 'comments', version: v })} onOpenChanges={openChanges} currentPageKey={currentPageKey} currentUserId={currentUserId} />}
       {view.name === 'comments' && <Comments version={view.version} onClose={close} />}
+      {view.name === 'changes' && (
+        <VersionChanges
+          version={view.version}
+          messageTab={messageTab}
+          onClose={close}
+          onOpenProfile={(userId) => push({ name: 'profile', userId })}
+        />
+      )}
       {view.name === 'settings' && (
         <Settings onOpenProfile={(userId) => push({ name: 'profile', userId })} onClose={close} />
       )}

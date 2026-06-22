@@ -23,6 +23,7 @@ interface Props {
   onClose: () => void;
   onOpenProfile: (userId: string) => void;
   onOpenComments: (version: FeedItem) => void;
+  onOpenChanges: (version: FeedItem) => void;
 }
 
 export function Profile({
@@ -32,6 +33,7 @@ export function Profile({
   onClose,
   onOpenProfile,
   onOpenComments,
+  onOpenChanges,
 }: Props): React.JSX.Element {
   const [data, setData] = useState<ProfileData | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -131,6 +133,7 @@ export function Profile({
           onToggleBookmark={onToggleBookmark}
           onShare={(x) => void shareVersion(x.page.urlKey, x.id, x.name)}
           onDelete={onDelete}
+          onOpenChanges={onOpenChanges}
         />
       ))}
       {data.modifications.length === 0 && <p className="muted">No modifications yet.</p>}
