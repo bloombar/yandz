@@ -172,12 +172,17 @@ export default defineContentScript({
      *  apply the given patches. Used when a change is deleted/edited so the page
      *  reflects the current change list. Keeps the applied version's identity. */
     async function applyPatches(patches: AnyPatch[]): Promise<void> {
+      // Resolve assets BEFORE mutating the live state. Otherwise the async resolve
+      // leaves a window where currentPatches points at the new (loopback) image URL
+      // but currentAssets is empty, so a MutationObserver re-apply during that gap
+      // sets <img> to an unreachable localhost URL and the swap visibly drops.
+      const assets = await resolveAssets(patches);
       engine.revertAll();
       overlay.clear();
       currentPatches = patches;
-      currentAssets = await resolveAssets(patches);
+      currentAssets = assets;
       if (patches.length) {
-        engine.apply(patches, document, currentAssets);
+        engine.apply(patches, document, assets);
         overlay.render(patches);
       }
       if (current) current = { ...current, patches: patches as VersionSummary['patches'] };
@@ -185,15 +190,16 @@ export default defineContentScript({
 
     /** Apply a version's patches (DOM mutations + visual overlay), replacing any current one. */
     async function applyVersion(version: VersionSummary | null): Promise<void> {
+      // Resolve assets first (see applyPatches) so there's no gap where the page
+      // shows the original/broken image between revert and re-apply.
+      const assets = version ? await resolveAssets(version.patches) : new Map<string, string>();
       engine.revertAll();
       overlay.clear();
       current = version;
-      currentPatches = [];
-      currentAssets = new Map();
+      currentPatches = version ? version.patches : [];
+      currentAssets = assets;
       if (version) {
-        currentPatches = version.patches;
-        currentAssets = await resolveAssets(version.patches);
-        engine.apply(version.patches, document, currentAssets);
+        engine.apply(version.patches, document, assets);
         overlay.render(version.patches); // drawings + annotations
       }
       notifyApplied();
