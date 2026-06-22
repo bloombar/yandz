@@ -58,6 +58,10 @@ const patchSchema = new Schema(
     target: { type: elementTargetSchema, required: true },
     payload: { type: Schema.Types.Mixed, required: true },
     order: { type: Number, required: true },
+    // Personal application scope (see shared PatchScope): 'page' applies only on this
+    // version's page; 'site'/'global' also auto-apply for the author across the host /
+    // all sites.
+    scope: { type: String, enum: ['page', 'site', 'global'], default: 'page' },
   },
   { _id: false },
 );

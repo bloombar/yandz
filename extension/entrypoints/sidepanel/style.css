@@ -109,6 +109,9 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .change-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #8882; }
 .change-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .change-desc:hover { text-decoration: underline; }
+/* Per-change scope dropdown (This page / All pages on this site / All web sites). */
+.scope-select { flex-shrink: 0; max-width: 42%; font: 11px system-ui; padding: 2px 4px; border: 1px solid #8884; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.scope-select:disabled { cursor: default; opacity: 0.7; }
 /* Expanded before/after detail under a change. */
 .change-details { margin: 2px 0 8px 12px; padding-left: 8px; border-left: 2px solid #8884; font-size: 12px; }
 .change-details .break { word-break: break-all; }

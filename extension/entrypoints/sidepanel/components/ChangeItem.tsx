@@ -6,8 +6,15 @@
  */
 import React, { useState } from 'react';
 import { Trash2 } from 'lucide-react';
-import type { AnyPatch } from '@yandz/shared';
+import type { AnyPatch, PatchScope } from '@yandz/shared';
 import { describePatch } from '../../../lib/describe-patch.js';
+
+/** Scope options for the per-change dropdown, in menu order. */
+const SCOPE_OPTIONS: { value: PatchScope; label: string }[] = [
+  { value: 'page', label: 'This page' },
+  { value: 'site', label: 'All pages on this site' },
+  { value: 'global', label: 'All web sites' },
+];
 
 /** Expanded before/after (or settings) detail for a change. */
 function ChangeDetails({ patch }: { patch: AnyPatch }): React.JSX.Element {
@@ -69,12 +76,16 @@ export function ChangeItem({
   patch,
   onHighlight,
   onDelete,
+  onScopeChange,
 }: {
   patch: AnyPatch;
   onHighlight: () => void;
   onDelete?: () => void;
+  /** Owner-only: change where this patch applies. Omit ⇒ the dropdown is shown disabled. */
+  onScopeChange?: (scope: PatchScope) => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
+  const scope = patch.scope ?? 'page';
   return (
     <div>
       <div className="change-row">
@@ -90,6 +101,21 @@ export function ChangeItem({
         >
           {describePatch(patch)}
         </span>
+        {/* Where this change applies. Disabled for non-owners (read-only viewers). */}
+        <select
+          className="scope-select"
+          aria-label="Where this change applies"
+          title="Where this change applies"
+          value={scope}
+          disabled={!onScopeChange}
+          onChange={(e) => onScopeChange?.(e.target.value as PatchScope)}
+        >
+          {SCOPE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
         {onDelete && (
           <button className="icon-btn" aria-label="Delete this change" title="Delete this change" onClick={onDelete}>
             <Trash2 size={14} />

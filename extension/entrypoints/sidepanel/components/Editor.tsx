@@ -15,7 +15,7 @@ import { PanelHeader } from './PanelHeader.js';
 import { PanelTabs, type VersionTab } from './PanelTabs.js';
 import { CommentBoard } from './CommentBoard.js';
 import { ChangeItem } from './ChangeItem.js';
-import type { AnyPatch, ElementTarget, DrawingStroke } from '@yandz/shared';
+import type { AnyPatch, ElementTarget, DrawingStroke, PatchScope } from '@yandz/shared';
 
 /** Auto-save lifecycle, surfaced as discrete status text near the Done button. */
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
@@ -129,6 +129,15 @@ export function Editor({
     dirtyRef.current = true;
     setPatches(next);
     void messageTab({ type: 'yandz:apply-patches', patches: next });
+  };
+
+  /** Change where a single patch applies (this page / site / all sites). Persisted by
+   *  the debounced auto-save like any other edit. */
+  const updatePatchScope = (index: number, scope: PatchScope) => {
+    const next = patches.map((p, i) => (i === index ? ({ ...p, scope } as AnyPatch) : p));
+    dirtyRef.current = true;
+    patchesRef.current = next;
+    setPatches(next);
   };
 
   // Preload the patches we're building on: the user's own version (to keep adding
@@ -317,6 +326,7 @@ export function Editor({
                 patch={p}
                 onHighlight={() => void messageTab({ type: 'yandz:highlight-element', target: p.target })}
                 onDelete={() => removePatch(i)}
+                onScopeChange={(scope) => updatePatchScope(i, scope)}
               />
             ))}
           {patches.length === 0 && (

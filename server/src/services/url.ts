@@ -45,3 +45,12 @@ export function normalizeUrl(raw: string, mode: 'exact' | 'path' = 'exact'): str
 export function pageKey(rawUrl: string): string {
   return normalizeUrl(rawUrl, 'path');
 }
+
+/** The lowercased hostname of a URL (the "site" for 'site'-scoped patches), or '' if unparseable. */
+export function hostOf(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}

@@ -25,6 +25,7 @@ const patchInput = z.object({
   target: z.record(z.any()),
   payload: z.record(z.any()),
   order: z.number(),
+  scope: z.enum(['page', 'site', 'global']).optional(),
 });
 
 const createSchema = z.object({

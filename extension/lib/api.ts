@@ -4,7 +4,7 @@
  * request. The base URL comes from the build-time env (dev server vs prod).
  */
 import { browser } from 'wxt/browser';
-import type { AnyPatch } from '@yandz/shared';
+import type { AnyPatch, PatchScope } from '@yandz/shared';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:4000';
 
@@ -51,6 +51,16 @@ export interface FeedResult {
 
 export type FeedSort = 'foryou' | 'latest';
 export type FeedScope = 'all' | 'page';
+
+/** One managed personal scoped patch (the settings tabs): a change broadened beyond its page. */
+export interface ScopedPatchEntry {
+  versionId: string;
+  order: number;
+  versionName: string;
+  /** Host of the page the version was originally made on. */
+  site: string;
+  patch: AnyPatch;
+}
 
 /** Read the stored auth token (session-scoped). */
 export async function getToken(): Promise<string | null> {
@@ -208,4 +218,20 @@ export const Api = {
 
   subscribePush: (subscription: PushSubscriptionJSON) =>
     api('/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription }) }),
+
+  // --- Personal scoped patches (/me) ---
+  // The current user's patches to auto-apply on this URL (site/global scope).
+  getMyPatches: (url: string) => api<{ patches: AnyPatch[] }>(`/me/patches?url=${encodeURIComponent(url)}`),
+  // Management lists for the settings tabs.
+  getMyGlobalPatches: () => api<{ patches: ScopedPatchEntry[] }>('/me/patches/global'),
+  getMySitePatches: () => api<{ patches: ScopedPatchEntry[] }>('/me/patches/site'),
+  // Change one patch's scope (single demotions: global→site, site→page).
+  setPatchScope: (versionId: string, order: number, scope: PatchScope) =>
+    api<{ ok: boolean }>('/me/patches/scope', { method: 'PATCH', body: JSON.stringify({ versionId, order, scope }) }),
+  // Bulk demote every 'site' patch on a host to 'page'.
+  demoteSitePatches: (host: string) =>
+    api<{ ok: boolean; demoted: number }>('/me/patches/demote-site', {
+      method: 'POST',
+      body: JSON.stringify({ host }),
+    }),
 };

@@ -11,7 +11,7 @@ import { defineBackground } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
 import { configurePanelBehavior, openPanel } from '../lib/browser-surface.js';
 import { registerPush } from '../lib/push.js';
-import { Api } from '../lib/api.js';
+import { Api, getToken } from '../lib/api.js';
 
 interface PushData {
   title: string;
@@ -67,6 +67,18 @@ export default defineBackground(() => {
       // hosted on loopback (PNA) or an http asset on an https page (mixed content).
       // The background fetches it and returns a data: URL the page can render inline.
       return fetchAsDataUrl(m.url).catch(() => null);
+    } else if (m?.type === 'yandz:get-my-patches' && m.url) {
+      // The viewer's personal site/global-scoped patches to auto-apply on this URL.
+      // Proxied (PNA) and authenticated (the background holds the session token).
+      // Skip the request entirely when logged out (avoids a 401 on every page load).
+      const u = m.url;
+      return getToken().then((t) =>
+        t
+          ? Api.getMyPatches(u)
+              .then((r) => r.patches)
+              .catch(() => null)
+          : [],
+      );
     }
     return undefined;
   });

@@ -18,6 +18,15 @@ export type PatchOp =
 /** How a Version's patches are scoped to URLs. */
 export type UrlMatchMode = 'exact' | 'path' | 'pattern';
 
+/**
+ * Per-patch personal application scope. `page` (default) is the normal behavior: the
+ * patch applies only on the version's own page. `site` and `global` make the patch
+ * ALSO auto-apply, for the creating user only, on every page of the same host or on
+ * every site respectively. Other users see the chosen scope but it doesn't broaden
+ * application for them.
+ */
+export type PatchScope = 'page' | 'site' | 'global';
+
 export interface UrlMatch {
   mode: UrlMatchMode;
   /** For 'exact'/'path': the urlKey; for 'pattern': a glob-ish pattern. */
@@ -70,6 +79,8 @@ export interface Patch<Op extends PatchOp = PatchOp> {
   payload: PatchPayloadMap[Op];
   /** Order within the Version's patch list. */
   order: number;
+  /** Personal application scope (defaults to 'page' when absent). See PatchScope. */
+  scope?: PatchScope;
 }
 
 export type AnyPatch = { [K in PatchOp]: Patch<K> }[PatchOp];

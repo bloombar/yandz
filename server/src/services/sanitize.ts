@@ -34,6 +34,7 @@ export function sanitizePatchList(patches: AnyPatch[]): SanitizeResult {
   if (!result.ok) return { ok: false, reason: result.reason };
 
   const cleaned = patches.map((p): AnyPatch => {
+    // Each branch spreads `...p`, so the top-level `scope` field is preserved.
     if (p.op === 'textReplace') {
       return { ...p, payload: { from: p.payload.from, to: sanitizeText(p.payload.to) } };
     }

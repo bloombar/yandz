@@ -17,6 +17,7 @@ import { votesRouter } from './routes/votes.js';
 import { commentsRouter } from './routes/comments.js';
 import { bookmarksRouter } from './routes/bookmarks.js';
 import { usersRouter } from './routes/users.js';
+import { meRouter } from './routes/me.js';
 import { relationshipsRouter } from './routes/relationships.js';
 import { uploadsRouter } from './routes/uploads.js';
 import { pushRouter } from './routes/push.js';
@@ -46,6 +47,7 @@ export function createApp(): Express {
 
   app.use('/users', usersRouter); // mixes requireAuth/withOptionalAuth per-route
   app.use('/users', relationshipsRouter);
+  app.use('/me', withOptionalAuth, meRouter); // personal scoped-patch management + lookup
   app.use('/uploads', uploadsRouter);
   app.use('/push', pushRouter);
 

@@ -31,6 +31,16 @@ async function getVersions(url: string): Promise<PageVersions | null> {
     title: document.title,
   })) as PageVersions | null;
 }
+
+/** The viewer's own site/global-scoped patches to auto-apply on this URL (via background). */
+async function getMyPatches(url: string): Promise<AnyPatch[]> {
+  try {
+    const res = (await browser.runtime.sendMessage({ type: 'yandz:get-my-patches', url })) as AnyPatch[] | null;
+    return res ?? [];
+  } catch {
+    return [];
+  }
+}
 import { PatchEngine } from '../lib/engine/applier.js';
 import { fingerprintElement } from '../lib/engine/fingerprint.js';
 import { matchTarget } from '../lib/engine/matcher.js';
@@ -145,6 +155,12 @@ export default defineContentScript({
     // URL → inlined data: URL) for display. The MutationObserver re-applies THESE.
     let currentPatches: AnyPatch[] = [];
     let currentAssets: Map<string, string> = new Map();
+    // The viewer's own patches scoped to this site / all sites (fetched once on load).
+    // They auto-apply (silently) layered UNDER whatever version is applied — and even
+    // when no version is applied — for the creating user only.
+    let personalPatches: AnyPatch[] = [];
+    /** A version's patches plus the personal site/global layer, applied together. */
+    const withPersonal = (base: AnyPatch[]): AnyPatch[] => (personalPatches.length ? [...base, ...personalPatches] : base);
     // Holds the fetched versions once loaded (null until then / on failure).
     let data: PageVersions | null = null;
     // Stops the active page-side tool (drawing), so it can be torn down when the
@@ -176,14 +192,15 @@ export default defineContentScript({
       // leaves a window where currentPatches points at the new (loopback) image URL
       // but currentAssets is empty, so a MutationObserver re-apply during that gap
       // sets <img> to an unreachable localhost URL and the swap visibly drops.
-      const assets = await resolveAssets(patches);
+      const eff = withPersonal(patches);
+      const assets = await resolveAssets(eff);
       engine.revertAll();
       overlay.clear();
-      currentPatches = patches;
+      currentPatches = eff;
       currentAssets = assets;
-      if (patches.length) {
-        engine.apply(patches, document, assets);
-        overlay.render(patches);
+      if (eff.length) {
+        engine.apply(eff, document, assets);
+        overlay.render(eff);
       }
       if (current) current = { ...current, patches: patches as VersionSummary['patches'] };
     }
@@ -191,16 +208,18 @@ export default defineContentScript({
     /** Apply a version's patches (DOM mutations + visual overlay), replacing any current one. */
     async function applyVersion(version: VersionSummary | null): Promise<void> {
       // Resolve assets first (see applyPatches) so there's no gap where the page
-      // shows the original/broken image between revert and re-apply.
-      const assets = version ? await resolveAssets(version.patches) : new Map<string, string>();
+      // shows the original/broken image between revert and re-apply. The personal
+      // site/global layer is always applied alongside (or alone, if no version).
+      const eff = withPersonal(version ? version.patches : []);
+      const assets = await resolveAssets(eff);
       engine.revertAll();
       overlay.clear();
       current = version;
-      currentPatches = version ? version.patches : [];
+      currentPatches = eff;
       currentAssets = assets;
-      if (version) {
-        engine.apply(version.patches, document, assets);
-        overlay.render(version.patches); // drawings + annotations
+      if (eff.length) {
+        engine.apply(eff, document, assets);
+        overlay.render(eff); // drawings + annotations
       }
       notifyApplied();
     }
@@ -326,7 +345,16 @@ export default defineContentScript({
     } catch {
       return; // backend unreachable
     }
-    if (!data || data.versions.length === 0) return;
+
+    // The viewer's own site/global-scoped patches auto-apply silently on every page,
+    // independent of shared versions or consent (they're the user's own choices).
+    personalPatches = await getMyPatches(location.href);
+
+    if (!data || data.versions.length === 0) {
+      // No shared versions here, but the personal layer may still apply on its own.
+      if (personalPatches.length) void applyVersion(null);
+      return;
+    }
 
     // Mount the floating icon with the version count.
     mountFloatingIcon({
@@ -341,14 +369,23 @@ export default defineContentScript({
     const pendingKey = `pendingApply:${data.page.urlKey}`;
     const pendingId =
       hashMatch?.[1] ?? ((await browser.storage.local.get(pendingKey))[pendingKey] as string | undefined);
+    let appliedVersion = false;
     if (pendingId) {
       await browser.storage.local.remove(pendingKey);
       const requested = data.versions.find((v) => v.id === pendingId);
-      if (requested) void applyVersion(requested);
-      else if (await hasConsent()) void applyVersion(data.versions[0]!);
+      if (requested) {
+        void applyVersion(requested);
+        appliedVersion = true;
+      } else if (await hasConsent()) {
+        void applyVersion(data.versions[0]!);
+        appliedVersion = true;
+      }
     } else if (await hasConsent()) {
       // Otherwise auto-apply the top version only after one-time per-site consent.
       void applyVersion(data.versions[0]!);
+      appliedVersion = true;
     }
+    // If no shared version auto-applied, still apply the personal site/global layer.
+    if (!appliedVersion && personalPatches.length) void applyVersion(null);
   },
 });
