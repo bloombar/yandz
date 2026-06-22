@@ -23,16 +23,15 @@ import { shareVersion } from '../../lib/share.js';
 import { AuthForm } from './components/AuthForm.js';
 import { VersionRow } from './components/VersionRow.js';
 import { Profile } from './components/Profile.js';
-import { Comments } from './components/Comments.js';
 import { Editor } from './components/Editor.js';
 import { Settings } from './components/Settings.js';
 import { VersionChanges } from './components/VersionChanges.js';
+import type { VersionTab } from './components/PanelTabs.js';
 
 type View =
   | { name: 'feed' }
   | { name: 'profile'; userId: string }
-  | { name: 'comments'; version: FeedItem }
-  | { name: 'changes'; version: FeedItem }
+  | { name: 'changes'; version: FeedItem; initialTab: VersionTab }
   | {
       name: 'editor';
       // Editing the viewer's OWN existing version (update it, no new version).
@@ -42,6 +41,7 @@ type View =
       baseVersionId?: string;
       baseAuthorHandle?: string;
       baseName?: string;
+      initialTab?: VersionTab;
       initialTool?: 'pick' | 'draw';
     }
   | { name: 'settings' };
@@ -235,10 +235,12 @@ export function App(): React.JSX.Element {
     }
   };
 
-  /** View a version's changes: the editable editor if you own it, else read-only. */
-  const openChanges = (v: FeedItem) => {
-    if (currentUserId && v.author.id === currentUserId) push({ name: 'editor', editVersionId: v.id, editName: v.name });
-    else push({ name: 'changes', version: v });
+  /** Open the version panel (Comments + Changes tabs). Editable editor if you own
+   *  the version, read-only otherwise; `tab` selects the initial tab. */
+  const openVersionPanel = (v: FeedItem, tab: VersionTab) => {
+    if (currentUserId && v.author.id === currentUserId)
+      push({ name: 'editor', editVersionId: v.id, editName: v.name, initialTab: tab });
+    else push({ name: 'changes', version: v, initialTab: tab });
   };
 
   const grantConsent = async () => {
@@ -378,11 +380,11 @@ export function App(): React.JSX.Element {
                 onApply={onApply}
                 onVote={onVote}
                 onOpenProfile={(userId) => push({ name: 'profile', userId })}
-                onOpenComments={(x) => push({ name: 'comments', version: x })}
+                onOpenComments={(x) => openVersionPanel(x, 'comments')}
                 onToggleBookmark={onToggleBookmark}
                 onShare={onShare}
                 onDelete={onDelete}
-                onOpenChanges={openChanges}
+                onOpenChanges={(x) => openVersionPanel(x, 'changes')}
               />
             ))}
             {items.length === 0 &&
@@ -401,11 +403,11 @@ export function App(): React.JSX.Element {
         </>
       )}
 
-      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(v) => push({ name: 'comments', version: v })} onOpenChanges={openChanges} currentPageKey={currentPageKey} currentUserId={currentUserId} />}
-      {view.name === 'comments' && <Comments version={view.version} onClose={close} />}
+      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(v) => openVersionPanel(v, 'comments')} onOpenChanges={(v) => openVersionPanel(v, 'changes')} currentPageKey={currentPageKey} currentUserId={currentUserId} />}
       {view.name === 'changes' && (
         <VersionChanges
           version={view.version}
+          initialTab={view.initialTab}
           messageTab={messageTab}
           onClose={close}
           onOpenProfile={(userId) => push({ name: 'profile', userId })}
@@ -423,6 +425,7 @@ export function App(): React.JSX.Element {
           baseVersionId={view.baseVersionId}
           baseAuthorHandle={view.baseAuthorHandle}
           baseName={view.baseName}
+          initialTab={view.initialTab}
           initialTool={view.initialTool}
           messageTab={messageTab}
           onSaved={async (newId) => {

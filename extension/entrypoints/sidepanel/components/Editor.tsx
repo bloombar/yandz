@@ -14,6 +14,8 @@ import { Api } from '../../../lib/api.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../../lib/config.js';
 import { describePatch } from '../../../lib/describe-patch.js';
 import { PanelHeader } from './PanelHeader.js';
+import { PanelTabs, type VersionTab } from './PanelTabs.js';
+import { CommentBoard } from './CommentBoard.js';
 import type { AnyPatch, ElementTarget, DrawingStroke } from '@yandz/shared';
 
 /** Auto-save lifecycle, surfaced as discrete status text near the Done button. */
@@ -48,6 +50,8 @@ interface Props {
   baseAuthorHandle?: string;
   /** Title of the base version, shown in the header. */
   baseName?: string;
+  /** Which tab to show first (editing defaults to Changes). */
+  initialTab?: VersionTab;
   /** Tool to auto-start on mount, when launched from a top-nav tool icon. */
   initialTool?: 'pick' | 'draw';
   /** Returns false when the content script isn't reachable on the active tab. */
@@ -65,6 +69,7 @@ export function Editor({
   baseVersionId,
   baseAuthorHandle,
   baseName,
+  initialTab = 'changes',
   initialTool,
   messageTab,
   onSaved,
@@ -73,6 +78,9 @@ export function Editor({
   const [patches, setPatches] = useState<AnyPatch[]>([]);
   const [picked, setPicked] = useState<PickedMessage | null>(null);
   const [name, setName] = useState(editName ?? '');
+  const [tab, setTab] = useState<VersionTab>(initialTab);
+  // The saved version id (reactive mirror of versionIdRef) for the Comments tab.
+  const [savedVersionId, setSavedVersionId] = useState<string | null>(editVersionId ?? null);
   const [status, setStatus] = useState<SaveStatus>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +162,7 @@ export function Editor({
           ? await Api.forkVersion(baseVersionId, { url, title: pageTitle, name: vName, patches: patchSet })
           : await Api.createVersion({ url, title: pageTitle, name: vName, patches: patchSet });
         versionIdRef.current = res.id;
+        setSavedVersionId(res.id); // enable the Comments tab now the version exists
         // Show the server's (possibly auto-generated) name so the user can see and
         // edit it. Doesn't mark dirty, so it won't trigger another save by itself.
         if (!nameRef.current.trim() && res.name) setName(res.name);
@@ -264,56 +273,63 @@ export function Editor({
         onClose={() => void done()}
       />
 
-      <div className="panel-body">
-        <p className="muted" style={{ marginTop: 0 }}>
-          Use the select-element and draw tools in the top bar to make changes; they auto-save.
-        </p>
-        {hint && <div className="error">{hint}</div>}
+      <PanelTabs tab={tab} setTab={setTab} changeCount={patches.length} />
 
-        {picked && <PickedEditor picked={picked} onAdd={addPatch} onSwapImage={swapImage} />}
-
-        <h3 className="muted">Changes ({patches.length})</h3>
-        {/* Newest change first; keep the real array index for delete/highlight. */}
-        {patches
-          .map((p, i) => ({ p, i }))
-          .reverse()
-          .map(({ p, i }) => (
-            <div className="change-row" key={i}>
-              <span
-                className="change-desc"
-                role="button"
-                title="Highlight on the page"
-                onClick={() => void messageTab({ type: 'yandz:highlight-element', target: p.target })}
-              >
-                {describePatch(p)}
-              </span>
-              <button
-                className="icon-btn"
-                aria-label="Delete this change"
-                title="Delete this change"
-                onClick={() => removePatch(i)}
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))}
-        {patches.length === 0 && (
-          <p className="muted" style={{ marginTop: 8 }}>
-            Use the select-element or draw tool above to make a change. Changes auto-save.
-          </p>
-        )}
-        {error && <div className="error">{error}</div>}
-        {/* Discrete auto-save status. */}
-        <div className="muted save-status" aria-live="polite" style={{ marginTop: 8 }}>
-          {status === 'saving'
-            ? 'Auto-saving…'
-            : lastSavedAt
-              ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}`
-              : status === 'pending'
-                ? 'Editing…'
-                : ''}
+      {tab === 'comments' ? (
+        <div className="panel-body">
+          <CommentBoard versionId={savedVersionId} />
         </div>
-      </div>
+      ) : (
+        <div className="panel-body">
+          <p className="muted" style={{ marginTop: 0 }}>
+            Use the select-element and draw tools in the top bar to make changes; they auto-save.
+          </p>
+          {hint && <div className="error">{hint}</div>}
+
+          {picked && <PickedEditor picked={picked} onAdd={addPatch} onSwapImage={swapImage} />}
+
+          {/* Newest change first; keep the real array index for delete/highlight. */}
+          {patches
+            .map((p, i) => ({ p, i }))
+            .reverse()
+            .map(({ p, i }) => (
+              <div className="change-row" key={i}>
+                <span
+                  className="change-desc"
+                  role="button"
+                  title="Highlight on the page"
+                  onClick={() => void messageTab({ type: 'yandz:highlight-element', target: p.target })}
+                >
+                  {describePatch(p)}
+                </span>
+                <button
+                  className="icon-btn"
+                  aria-label="Delete this change"
+                  title="Delete this change"
+                  onClick={() => removePatch(i)}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          {patches.length === 0 && (
+            <p className="muted" style={{ marginTop: 8 }}>
+              Use the select-element or draw tool above to make a change. Changes auto-save.
+            </p>
+          )}
+          {error && <div className="error">{error}</div>}
+          {/* Discrete auto-save status. */}
+          <div className="muted save-status" aria-live="polite" style={{ marginTop: 8 }}>
+            {status === 'saving'
+              ? 'Auto-saving…'
+              : lastSavedAt
+                ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}`
+                : status === 'pending'
+                  ? 'Editing…'
+                  : ''}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
