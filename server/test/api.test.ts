@@ -334,6 +334,20 @@ describe('bookmarks', () => {
   });
 });
 
+describe('feed mine=1 (By you)', () => {
+  it('returns only the viewer\'s own versions', async () => {
+    const me = await makeUser('byme');
+    const other = await makeUser('byother');
+    const mineId = await makeVersion(me.token, 'https://example.com/byme', 'mine');
+    const otherId = await makeVersion(other.token, 'https://example.com/byme', 'theirs');
+
+    const feed = await request(app).get('/feed').query({ mine: '1', scope: 'all' }).set(auth(me.token));
+    const ids = feed.body.versions.map((v: any) => v.id);
+    expect(ids).toContain(mineId);
+    expect(ids).not.toContain(otherId);
+  });
+});
+
 describe('versioning is session-based', () => {
   it('lets one user have multiple versions on the same page', async () => {
     const u = await makeUser('multi');

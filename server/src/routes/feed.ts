@@ -30,16 +30,31 @@ async function resolveScope(
   return { currentPageKey: key, pageId: scope === 'page' && page ? (page._id as Types.ObjectId) : null };
 }
 
-// GET /feed — global (or this-page) ranked list of versions.
+// GET /feed — global (or this-page) ranked list of versions. With `mine=1`, only
+// the viewer's own versions (newest first) — backs the "By you" tab.
 feedRouter.get('/', async (req: Request, res: Response) => {
   const sort = (String(req.query.sort ?? 'foryou') as SortMode);
   const scope = String(req.query.scope ?? 'all');
   const rawUrl = String(req.query.url ?? '');
+  const mine = String(req.query.mine ?? '') === '1';
   const { currentPageKey, pageId } = await resolveScope(scope, rawUrl);
 
   // scope=page with no matching page → empty (but still report the key).
   if (scope === 'page' && !pageId) {
     res.json({ currentPageKey, versions: [] });
+    return;
+  }
+
+  // "By you": the viewer's own versions, newest first.
+  if (mine) {
+    if (!req.userId) {
+      res.json({ currentPageKey, versions: [] });
+      return;
+    }
+    const filter: Record<string, unknown> = { authorId: new Types.ObjectId(req.userId) };
+    if (pageId) filter.pageId = pageId;
+    const docs = await Version.find(filter).sort({ createdAt: -1 }).limit(FEED_LIMIT).lean();
+    res.json({ currentPageKey, versions: await serializeVersions(docs as unknown as RawVersion[], req.userId) });
     return;
   }
 

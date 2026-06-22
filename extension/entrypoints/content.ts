@@ -84,11 +84,15 @@ export default defineContentScript({
     const hasConsent = async (): Promise<boolean> =>
       ((await browser.storage.local.get(consentKey))[consentKey] as boolean) ?? false;
 
-    /** Tell the side panel which version (if any) is currently applied to this page,
-     *  so it can highlight it in the list — including auto-applied versions on load. */
+    /** Record which version (if any) is currently applied to this page so the side
+     *  panel can highlight it — including versions auto-applied on load, before the
+     *  panel was open/authenticated. Persisted to shared session storage (reliable
+     *  regardless of message timing) and also broadcast for live updates. */
     function notifyApplied(): void {
+      const urlKey = data?.page.urlKey;
+      if (urlKey) void browser.storage.session.set({ [`applied:${urlKey}`]: current?.id ?? null }).catch(() => {});
       void browser.runtime
-        .sendMessage({ type: 'yandz:applied', urlKey: data?.page.urlKey ?? null, versionId: current?.id ?? null })
+        .sendMessage({ type: 'yandz:applied', urlKey: urlKey ?? null, versionId: current?.id ?? null })
         .catch(() => {});
     }
 

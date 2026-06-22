@@ -35,6 +35,7 @@ export function Profile({
 }: Props): React.JSX.Element {
   const [data, setData] = useState<ProfileData | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [scope, setScope] = useState<'all' | 'page'>('all');
 
   useEffect(() => {
     setMenuOpen(false);
@@ -102,7 +103,23 @@ export function Profile({
         </div>
       </PanelHeader>
 
-      {data.modifications.map((v) => (
+      {/* All ↔ This page filter (when a real web page is open), same as the feeds. */}
+      {currentPageKey && (
+        <div className="scope-toggle">
+          <div className="pills">
+            {(['all', 'page'] as const).map((s) => (
+              <button key={s} className={`pill ${scope === s ? 'active' : ''}`} onClick={() => setScope(s)}>
+                {s === 'all' ? 'All' : 'This page'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(scope === 'page' && currentPageKey
+        ? data.modifications.filter((m) => m.page.urlKey === currentPageKey)
+        : data.modifications
+      ).map((v) => (
         <VersionRow
           key={v.id}
           version={v}

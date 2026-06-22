@@ -137,6 +137,10 @@ export const Api = {
   getBookmarksFeed: (scope: FeedScope, url?: string) =>
     api<FeedResult>(`/feed/bookmarks?scope=${scope}&url=${encodeURIComponent(url ?? '')}`),
 
+  // The viewer's own versions (newest first) — the "By you" tab.
+  getMyFeed: (scope: FeedScope, url?: string) =>
+    api<FeedResult>(`/feed?mine=1&scope=${scope}&url=${encodeURIComponent(url ?? '')}`),
+
   toggleBookmark: (id: string, on: boolean) =>
     api<{ bookmarked: boolean }>(`/versions/${id}/bookmark`, { method: on ? 'POST' : 'DELETE' }),
 

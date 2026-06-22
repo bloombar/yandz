@@ -59,6 +59,9 @@ type EditorMessage = PickedMessage | DrawMessage | TextEditedMessage;
 
 interface Props {
   url: string;
+  /** Editing the viewer's OWN existing version — updates it in place (no new version). */
+  editVersionId?: string;
+  editName?: string;
   baseVersionId?: string;
   /** Handle of the base version's author, shown in the header ("based on … by u/x"). */
   baseAuthorHandle?: string;
@@ -75,6 +78,8 @@ interface Props {
 
 export function Editor({
   url,
+  editVersionId,
+  editName,
   baseVersionId,
   baseAuthorHandle,
   baseName,
@@ -85,7 +90,7 @@ export function Editor({
 }: Props): React.JSX.Element {
   const [patches, setPatches] = useState<AnyPatch[]>([]);
   const [picked, setPicked] = useState<PickedMessage | null>(null);
-  const [name, setName] = useState('');
+  const [name, setName] = useState(editName ?? '');
   const [status, setStatus] = useState<SaveStatus>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,8 +108,9 @@ export function Editor({
   };
 
   // Refs so the debounced save reads the latest values and persists to ONE version
-  // for the whole editing session (create once, then update).
-  const versionIdRef = useRef<string | null>(null);
+  // for the whole editing session. When editing the user's own version, we target
+  // it from the start so saves UPDATE it (no new version is created).
+  const versionIdRef = useRef<string | null>(editVersionId ?? null);
   const savingRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const patchesRef = useRef(patches);
@@ -124,14 +130,16 @@ export function Editor({
     setPatches((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // When starting from another user's version, preload its patches as the base so the
-  // new (attributed) version builds on them. This load is not a user edit → not dirty.
+  // Preload the patches we're building on: the user's own version (to keep adding
+  // to it) or another user's version (as the base for a derivative). Not a user
+  // edit → not marked dirty, so it doesn't trigger a redundant save.
   useEffect(() => {
-    if (!baseVersionId) return;
-    void Api.getVersion(baseVersionId)
-      .then((base) => setPatches(base.patches.map((p, i) => ({ ...p, order: i }))))
+    const preloadId = editVersionId ?? baseVersionId;
+    if (!preloadId) return;
+    void Api.getVersion(preloadId)
+      .then((v) => setPatches(v.patches.map((p, i) => ({ ...p, order: i }))))
       .catch(() => {});
-  }, [baseVersionId]);
+  }, [editVersionId, baseVersionId]);
 
   // Auto-start the tool the user launched from the top nav.
   const startedRef = useRef(false);
@@ -264,10 +272,12 @@ export function Editor({
           auto-save, then returns to the list. */}
       <PanelHeader
         title={
-          `“${name || 'New version'}”` +
-          (baseVersionId
-            ? `, based on “${baseName ?? 'a version'}” by u/${baseAuthorHandle ?? 'another'}`
-            : '')
+          editVersionId
+            ? `“${name || 'Your version'}”` // editing your own version (no attribution)
+            : `“${name || 'New version'}”` +
+              (baseVersionId
+                ? `, based on “${baseName ?? 'a version'}” by u/${baseAuthorHandle ?? 'another'}`
+                : '')
         }
         onClose={() => void done()}
       />

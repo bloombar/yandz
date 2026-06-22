@@ -33,6 +33,10 @@ type View =
   | { name: 'comments'; version: FeedItem }
   | {
       name: 'editor';
+      // Editing the viewer's OWN existing version (update it, no new version).
+      editVersionId?: string;
+      editName?: string;
+      // Deriving from another user's version (creates a new attributed version).
       baseVersionId?: string;
       baseAuthorHandle?: string;
       baseName?: string;
@@ -40,7 +44,7 @@ type View =
     }
   | { name: 'settings' };
 
-type TabKey = 'foryou' | 'latest' | 'bookmarks';
+type TabKey = 'foryou' | 'latest' | 'byyou' | 'bookmarks';
 
 async function getActiveTab(): Promise<{ id?: number; url?: string }> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -113,13 +117,17 @@ export function App(): React.JSX.Element {
     setUrl(active.url);
     // "This page" only applies to real web pages; otherwise force global.
     const effScope: FeedScope = scope === 'page' && isWebUrl(active.url) ? 'page' : 'all';
+    let pageKeyNow: string | null = null;
     try {
       const result =
         tab === 'bookmarks'
           ? await Api.getBookmarksFeed(effScope, active.url)
-          : await Api.getFeed(tab as FeedSort, effScope, active.url);
+          : tab === 'byyou'
+            ? await Api.getMyFeed(effScope, active.url)
+            : await Api.getFeed(tab as FeedSort, effScope, active.url);
       setItems(result.versions);
       setCurrentPageKey(result.currentPageKey);
+      pageKeyNow = result.currentPageKey;
       setListError(null);
     } catch (err) {
       setItems([]);
@@ -133,9 +141,17 @@ export function App(): React.JSX.Element {
         /* opaque origin */
       }
     }
-    // Reflect whatever the content script currently has applied on the page
-    // (auto-applied default, a shared-link version, or a prior selection).
-    setSelectedId(await queryApplied());
+    // Reflect whatever the content script currently has applied on the page — read
+    // from shared session storage (set by the content script, reliable across the
+    // login / panel-open timing), falling back to a direct query.
+    if (pageKeyNow) {
+      const k = `applied:${pageKeyNow}`;
+      const obj = (await browser.storage.session.get(k).catch(() => ({}))) as Record<string, unknown>;
+      const stored = obj[k] as string | null | undefined;
+      setSelectedId(stored !== undefined ? (stored ?? null) : await queryApplied());
+    } else {
+      setSelectedId(await queryApplied());
+    }
   }, [tab, scope, queryApplied]);
 
   // Reflect late auto-applies: the content script broadcasts the applied version
@@ -243,14 +259,19 @@ export function App(): React.JSX.Element {
         tool === 'pick' ? { type: 'yandz:start-picker' } : { type: 'yandz:start-draw', color: '#e11' },
       );
     } else {
-      // When a version is applied, the new version is "based on" it — carry its
-      // author handle so the editor header reads "Based on u/handle's".
+      // Decide what an edit session does, based on what's applied:
+      //  - my own applied version → keep editing THAT version (no new version);
+      //  - another user's applied version → new derivative (attributed);
+      //  - nothing applied (original) → new version.
       const base = selectedId ? items.find((i) => i.id === selectedId) : undefined;
+      const editingOwn = base && currentUserId && base.author.id === currentUserId;
       push({
         name: 'editor',
-        baseVersionId: selectedId ?? undefined,
-        baseAuthorHandle: base?.author.handle,
-        baseName: base?.name,
+        ...(editingOwn
+          ? { editVersionId: base!.id, editName: base!.name }
+          : base
+            ? { baseVersionId: base.id, baseAuthorHandle: base.author.handle, baseName: base.name }
+            : {}),
         initialTool: tool,
       });
     }
@@ -262,6 +283,7 @@ export function App(): React.JSX.Element {
   const TABS: { key: TabKey; label: string }[] = [
     { key: 'foryou', label: 'For you' },
     { key: 'latest', label: 'Latest' },
+    { key: 'byyou', label: 'By you' },
     { key: 'bookmarks', label: 'Bookmarks' },
   ];
 
@@ -357,7 +379,11 @@ export function App(): React.JSX.Element {
                 <p className="error">Couldn’t load the feed: {listError}</p>
               ) : (
                 <p className="muted">
-                  {tab === 'bookmarks' ? 'No bookmarks yet.' : 'No modifications to show.'}
+                  {tab === 'bookmarks'
+                    ? 'No bookmarks yet.'
+                    : tab === 'byyou'
+                      ? 'You haven’t made any versions yet.'
+                      : 'No modifications to show.'}
                 </p>
               ))}
           </div>
@@ -372,6 +398,8 @@ export function App(): React.JSX.Element {
       {view.name === 'editor' && url && (
         <Editor
           url={url}
+          editVersionId={view.editVersionId}
+          editName={view.editName}
           baseVersionId={view.baseVersionId}
           baseAuthorHandle={view.baseAuthorHandle}
           baseName={view.baseName}
