@@ -51,18 +51,22 @@ export function startInlineEdit(el: Element, handlers: InlineEditHandlers): void
   sel?.addRange(range);
 
   let done = false;
+  let blurTimer = 0;
   function finish(commit: boolean): void {
     if (done) return;
     done = true;
     editing = false;
+    clearTimeout(blurTimer);
     node.style.outline = prevOutline;
     if (prevEditable === null) node.removeAttribute('contenteditable');
     else node.setAttribute('contenteditable', prevEditable);
 
     node.removeEventListener('keydown', onKey, true);
+    node.removeEventListener('blur', onBlur);
     document.removeEventListener('mousedown', onMouseDown, true);
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('submit', onSubmit, true);
+    window.removeEventListener('blur', onBlur);
     window.removeEventListener('beforeunload', onBeforeUnload);
 
     const to = node.textContent ?? '';
@@ -141,9 +145,22 @@ export function startInlineEdit(el: Element, handlers: InlineEditHandlers): void
     e.returnValue = '';
   }
 
+  // Focus left the edited element — the user clicked into the extension sidebar, the
+  // browser chrome, another tab/app, or any element that takes focus. Commit so the
+  // edit (and its highlight) doesn't linger. Deferred so that an in-page click on a
+  // non-parent commits via onClick FIRST (which also blocks that element's
+  // navigation); the `done` guard makes the later blur finish a harmless no-op. For a
+  // pure focus loss (no page click follows) the deferred finish is what ends the edit.
+  function onBlur(): void {
+    clearTimeout(blurTimer);
+    blurTimer = window.setTimeout(() => finish(true), 0);
+  }
+
   node.addEventListener('keydown', onKey, true);
+  node.addEventListener('blur', onBlur);
   document.addEventListener('mousedown', onMouseDown, true);
   document.addEventListener('click', onClick, true);
   document.addEventListener('submit', onSubmit, true);
+  window.addEventListener('blur', onBlur);
   window.addEventListener('beforeunload', onBeforeUnload);
 }

@@ -15,6 +15,8 @@ import { PanelHeader } from './PanelHeader.js';
 interface Props {
   onOpenProfile: (userId: string) => void;
   onClose: () => void;
+  /** Tell the loaded page to re-fetch + re-apply the personal layer (after a demote). */
+  messageTab: (payload: unknown) => Promise<boolean> | void;
 }
 
 type SettingsTab = 'people' | 'global' | 'site';
@@ -25,7 +27,10 @@ const TABS: { key: SettingsTab; label: string }[] = [
   { key: 'site', label: 'Site-specific changes' },
 ];
 
-export function Settings({ onOpenProfile, onClose }: Props): React.JSX.Element {
+export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.JSX.Element {
+  /** After demoting a scoped change, remove its effect from the loaded page now. */
+  const refreshPage = () => void messageTab({ type: 'yandz:refresh-personal' });
+
   const [tab, setTab] = useState<SettingsTab>('people');
   const [following, setFollowing] = useState<PublicUser[]>([]);
   const [muted, setMuted] = useState<PublicUser[]>([]);
@@ -126,7 +131,9 @@ export function Settings({ onOpenProfile, onClose }: Props): React.JSX.Element {
             {globalPatches.map((e) =>
               patchCard(e, async () => {
                 await Api.setPatchScope(e.versionId, e.order, 'site');
+                refreshPage();
                 await loadGlobal();
+                await loadSite();
               }),
             )}
             {globalPatches.length === 0 && <p className="muted">None.</p>}
@@ -148,6 +155,7 @@ export function Settings({ onOpenProfile, onClose }: Props): React.JSX.Element {
                     className="btn"
                     onClick={async () => {
                       await Api.demoteSitePatches(site);
+                      refreshPage();
                       await loadSite();
                     }}
                   >
@@ -157,6 +165,7 @@ export function Settings({ onOpenProfile, onClose }: Props): React.JSX.Element {
                 {entries.map((e) =>
                   patchCard(e, async () => {
                     await Api.setPatchScope(e.versionId, e.order, 'page');
+                    refreshPage();
                     await loadSite();
                   }),
                 )}

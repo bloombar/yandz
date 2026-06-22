@@ -282,6 +282,15 @@ export default defineContentScript({
         case 'yandz:revert':
           revertToOriginal();
           break;
+        case 'yandz:refresh-personal':
+          // A scope change in account settings (e.g. demoting a global/site change)
+          // — re-fetch the personal layer and re-apply so the change is removed from
+          // (or added to) the loaded page immediately, without a reload.
+          void getMyPatches(location.href).then((p) => {
+            personalPatches = p;
+            void applyVersion(current);
+          });
+          break;
         case 'yandz:grant-consent':
           void browser.storage.local.set({ [consentKey]: true });
           if (data?.versions[0]) void applyVersion(data.versions[0]);

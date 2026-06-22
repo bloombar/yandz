@@ -418,7 +418,7 @@ export function App(): React.JSX.Element {
         />
       )}
       {view.name === 'settings' && (
-        <Settings onOpenProfile={(userId) => push({ name: 'profile', userId })} onClose={close} />
+        <Settings onOpenProfile={(userId) => push({ name: 'profile', userId })} onClose={close} messageTab={messageTab} />
       )}
       {view.name === 'editor' && url && (
         <Editor

@@ -114,6 +114,11 @@ test('per-change scope applies site/global patches across pages for the author o
     expect(asB.title, 'other user sees no global patch').toBeNull();
     console.log('[e2e] other user: nothing ✓');
 
+    // Author on the other host → only the global patch applies (h1 title set).
+    await setToken(sw, tokenA);
+    await page.goto(OTHER_HOST, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await expect.poll(async () => (await h1State(page)).title, { timeout: 45_000 }).toBe('GLOBAL-SCOPED');
+
     // Demote the global patch → site (the Settings "Changes to all sites" delete).
     const demote = await fetch(`${API}/me/patches/scope`, {
       method: 'PATCH',
@@ -122,12 +127,19 @@ test('per-change scope applies site/global patches across pages for the author o
     });
     expect(demote.ok).toBeTruthy();
 
-    // Back as author on the other host → the (now site-scoped) patch no longer applies there.
-    await setToken(sw, tokenA);
-    await page.goto(OTHER_HOST, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await page.waitForTimeout(3000);
-    expect((await h1State(page)).title, 'demoted patch no longer applies off original host').toBeNull();
-    console.log('[e2e] after demote: global gone off-host ✓');
+    // Settings tells the loaded page to refresh the personal layer — the demoted
+    // change must vanish from the page IMMEDIATELY, with no reload.
+    const otherTabId = await sw.evaluate(async () => {
+      const tabs = await (globalThis as any).chrome.tabs.query({});
+      return tabs.find((t: any) => t.url?.includes('example.org'))?.id as number;
+    });
+    await sw.evaluate(async (id: number) => {
+      await (globalThis as any).chrome.tabs.sendMessage(id, { type: 'yandz:refresh-personal' });
+    }, otherTabId);
+    await expect
+      .poll(async () => (await h1State(page)).title, { message: 'demoted change removed from page immediately', timeout: 30_000 })
+      .toBeNull();
+    console.log('[e2e] demote → removed from loaded page immediately ✓');
 
     // "Revert to original" clears the personal layer too. On the original host the
     // (now site-scoped) patches apply; reverting must restore the pristine page.
