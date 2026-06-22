@@ -243,6 +243,9 @@ export function App(): React.JSX.Element {
     else push({ name: 'changes', version: v, initialTab: tab });
   };
 
+  /** "See details": open the panel defaulting to Comments if any exist, else Changes. */
+  const openDetails = (v: FeedItem) => openVersionPanel(v, v.commentCount > 0 ? 'comments' : 'changes');
+
   const grantConsent = async () => {
     if (isWebUrl(url)) {
       try {
@@ -385,6 +388,7 @@ export function App(): React.JSX.Element {
                 onShare={onShare}
                 onDelete={onDelete}
                 onOpenChanges={(x) => openVersionPanel(x, 'changes')}
+                onOpenDetails={openDetails}
               />
             ))}
             {items.length === 0 &&
@@ -403,7 +407,7 @@ export function App(): React.JSX.Element {
         </>
       )}
 
-      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(v) => openVersionPanel(v, 'comments')} onOpenChanges={(v) => openVersionPanel(v, 'changes')} currentPageKey={currentPageKey} currentUserId={currentUserId} />}
+      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(v) => openVersionPanel(v, 'comments')} onOpenChanges={(v) => openVersionPanel(v, 'changes')} onOpenDetails={openDetails} currentPageKey={currentPageKey} currentUserId={currentUserId} />}
       {view.name === 'changes' && (
         <VersionChanges
           version={view.version}

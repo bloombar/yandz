@@ -24,6 +24,7 @@ interface Props {
   onOpenProfile: (userId: string) => void;
   onOpenComments: (version: FeedItem) => void;
   onOpenChanges: (version: FeedItem) => void;
+  onOpenDetails: (version: FeedItem) => void;
 }
 
 export function Profile({
@@ -34,6 +35,7 @@ export function Profile({
   onOpenProfile,
   onOpenComments,
   onOpenChanges,
+  onOpenDetails,
 }: Props): React.JSX.Element {
   const [data, setData] = useState<ProfileData | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -134,6 +136,7 @@ export function Profile({
           onShare={(x) => void shareVersion(x.page.urlKey, x.id, x.name)}
           onDelete={onDelete}
           onOpenChanges={onOpenChanges}
+          onOpenDetails={onOpenDetails}
         />
       ))}
       {data.modifications.length === 0 && <p className="muted">No modifications yet.</p>}

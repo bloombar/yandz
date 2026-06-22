@@ -39,6 +39,8 @@ export interface FeedItem extends VersionSummary {
   myVote: 1 | -1 | 0;
   /** Author of the version this was based on (for "based on u/x" links), or null. */
   parentAuthor: { id: string; handle: string } | null;
+  /** Title of the version this was based on, or null. */
+  parentName: string | null;
 }
 
 export interface FeedResult {

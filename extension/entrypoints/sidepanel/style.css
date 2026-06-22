@@ -52,6 +52,10 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .url-text { color: #8889; cursor: pointer; }
 .changes-link { color: #4c9ffe; cursor: pointer; }
 .changes-link:hover { text-decoration: underline; }
+/* "See details" — revealed on row hover (keeps its space to avoid layout shift). */
+.see-details { color: #4c9ffe; cursor: pointer; font-size: 11px; flex-shrink: 0; visibility: hidden; }
+.version-row:hover .see-details { visibility: visible; }
+.see-details:hover { text-decoration: underline; }
 .row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .votes { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 /* Icon buttons (nav tools, row actions, close, kebab). */

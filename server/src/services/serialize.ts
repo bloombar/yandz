@@ -34,6 +34,8 @@ export interface SerializedVersion {
   parentVersionId: string | null;
   /** Author of the version this one was based on (for "based on u/x" links), or null. */
   parentAuthor: { id: string; handle: string } | null;
+  /** Title of the version this one was based on, or null. */
+  parentName: string | null;
   up: number;
   down: number;
   hotScore: number;
@@ -58,9 +60,10 @@ export async function serializeVersions(
   // Resolve the authors of parent versions (for "based on u/x" attribution).
   const parentIds = versions.map((v) => v.parentVersionId).filter(Boolean) as Array<Types.ObjectId | string>;
   const parentVersions = parentIds.length
-    ? await Version.find({ _id: { $in: parentIds } }).select('authorId').lean()
+    ? await Version.find({ _id: { $in: parentIds } }).select('authorId name').lean()
     : [];
   const parentAuthorByParentId = new Map(parentVersions.map((pv) => [String(pv._id), String(pv.authorId)]));
+  const parentNameByParentId = new Map(parentVersions.map((pv) => [String(pv._id), pv.name]));
 
   const authorIds = [
     ...new Set([
@@ -101,6 +104,7 @@ export async function serializeVersions(
     parentAuthor: parentAuthorId
       ? { id: parentAuthorId, handle: handleById.get(parentAuthorId) ?? 'unknown' }
       : null,
+    parentName: v.parentVersionId ? (parentNameByParentId.get(String(v.parentVersionId)) ?? null) : null,
     up: v.up,
     down: v.down,
     hotScore: v.hotScore,

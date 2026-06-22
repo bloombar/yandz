@@ -28,6 +28,8 @@ interface Props {
   onDelete: (v: FeedItem) => void;
   /** Open the version's changes panel (editable if owned, read-only otherwise). */
   onOpenChanges: (v: FeedItem) => void;
+  /** Open the version panel with the smart default tab (hover "See details"). */
+  onOpenDetails: (v: FeedItem) => void;
 }
 
 /** Middle-truncate a long URL so the host and tail stay visible. */
@@ -48,6 +50,7 @@ export function VersionRow({
   onShare,
   onDelete,
   onOpenChanges,
+  onOpenDetails,
 }: Props): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const isAuthor = !!currentUserId && currentUserId === v.author.id;
@@ -134,6 +137,10 @@ export function VersionRow({
             </>
           )}
         </div>
+        {/* Revealed on row hover; opens the details panel (smart default tab). */}
+        <span className="see-details" role="button" title="See details" onClick={() => onOpenDetails(v)}>
+          See details
+        </span>
         <span className="votes">
           <button
             className={`icon-btn vote-down ${v.myVote === -1 ? 'active' : ''}`}

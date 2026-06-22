@@ -42,11 +42,10 @@ export function VersionChanges({
         {v.parentAuthor && (
           <>
             {' '}
-            · <GitFork size={11} style={{ verticalAlign: 'middle' }} /> based on{' '}
+            · <GitFork size={11} style={{ verticalAlign: 'middle' }} /> based on “{v.parentName ?? 'a version'}” by{' '}
             <span className="handle" onClick={() => onOpenProfile(v.parentAuthor!.id)}>
               u/{v.parentAuthor.handle}
             </span>
-            ’s version
           </>
         )}
       </div>
