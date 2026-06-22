@@ -47,6 +47,14 @@ pagesRouter.get('/', async (req: Request, res: Response) => {
     return;
   }
 
+  // Backfill the page title from the visitor's document.title when we don't have
+  // one yet (titles aren't always captured at creation time).
+  const titleParam = String(req.query.title ?? '').trim();
+  if (titleParam && !page.title) {
+    await Page.updateOne({ _id: page._id }, { $set: { title: titleParam } });
+    page.title = titleParam;
+  }
+
   const [social, versions] = await Promise.all([
     loadViewerSocial(req.userId ?? null),
     Version.find({ pageId: page._id }).lean(),

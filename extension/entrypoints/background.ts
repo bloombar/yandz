@@ -31,7 +31,7 @@ export default defineBackground(() => {
 
   // The content-script floating icon posts this to toggle the panel.
   browser.runtime.onMessage.addListener((msg: unknown, sender: { tab?: { windowId?: number } }) => {
-    const m = msg as { type?: string; url?: string };
+    const m = msg as { type?: string; url?: string; title?: string };
     if (m?.type === 'yandz:open-panel') {
       void openPanel(sender.tab?.windowId);
     } else if (m?.type === 'yandz:register-push') {
@@ -42,7 +42,7 @@ export default defineBackground(() => {
       // the page's origin and Chrome's Private Network Access blocks it from reaching
       // a loopback backend (localhost). The background runs in the extension context
       // and can. Returning a Promise responds to the sender.
-      return Api.getVersionsForUrl(m.url).catch(() => null);
+      return Api.getVersionsForUrl(m.url, 'foryou', m.title).catch(() => null);
     }
     return undefined;
   });

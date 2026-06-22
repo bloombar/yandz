@@ -24,7 +24,12 @@ import type { PageVersions, VersionSummary } from '../lib/api.js';
  * Network Access; the background (extension context) can reach localhost.
  */
 async function getVersions(url: string): Promise<PageVersions | null> {
-  return (await browser.runtime.sendMessage({ type: 'yandz:get-versions', url })) as PageVersions | null;
+  // Send the page's title so the server can backfill a missing Page.title.
+  return (await browser.runtime.sendMessage({
+    type: 'yandz:get-versions',
+    url,
+    title: document.title,
+  })) as PageVersions | null;
 }
 import { PatchEngine } from '../lib/engine/applier.js';
 import { fingerprintElement } from '../lib/engine/fingerprint.js';

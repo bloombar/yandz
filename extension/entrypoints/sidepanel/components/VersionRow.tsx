@@ -88,7 +88,7 @@ export function VersionRow({
                     className="kebab-item"
                     onClick={() => {
                       setMenuOpen(false);
-                      if (confirm('Delete this version? This can’t be undone.')) onDelete(v);
+                      onDelete(v);
                     }}
                   >
                     Delete

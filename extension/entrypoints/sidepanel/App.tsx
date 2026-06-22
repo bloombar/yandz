@@ -46,9 +46,9 @@ type View =
 
 type TabKey = 'foryou' | 'latest' | 'byyou' | 'bookmarks';
 
-async function getActiveTab(): Promise<{ id?: number; url?: string }> {
+async function getActiveTab(): Promise<{ id?: number; url?: string; title?: string }> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  return { id: tab?.id, url: tab?.url };
+  return { id: tab?.id, url: tab?.url, title: tab?.title };
 }
 
 /** Whether a URL is a normal web page (content scripts + this-page scope apply). */
@@ -59,6 +59,7 @@ function isWebUrl(url?: string): boolean {
 export function App(): React.JSX.Element {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [url, setUrl] = useState<string | undefined>();
+  const [pageTitle, setPageTitle] = useState<string | undefined>();
   const [tab, setTab] = useState<TabKey>('foryou');
   const [scope, setScope] = useState<FeedScope>('all');
   const [items, setItems] = useState<FeedItem[]>([]);
@@ -115,6 +116,7 @@ export function App(): React.JSX.Element {
     const active = await getActiveTab();
     lastUrlRef.current = active.url;
     setUrl(active.url);
+    setPageTitle(active.title);
     // "This page" only applies to real web pages; otherwise force global.
     const effScope: FeedScope = scope === 'page' && isWebUrl(active.url) ? 'page' : 'all';
     let pageKeyNow: string | null = null;
@@ -398,6 +400,7 @@ export function App(): React.JSX.Element {
       {view.name === 'editor' && url && (
         <Editor
           url={url}
+          pageTitle={pageTitle}
           editVersionId={view.editVersionId}
           editName={view.editName}
           baseVersionId={view.baseVersionId}

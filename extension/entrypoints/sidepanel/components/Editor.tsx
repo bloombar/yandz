@@ -59,6 +59,8 @@ type EditorMessage = PickedMessage | DrawMessage | TextEditedMessage;
 
 interface Props {
   url: string;
+  /** The active page's title, stored on the Page when creating a version. */
+  pageTitle?: string;
   /** Editing the viewer's OWN existing version — updates it in place (no new version). */
   editVersionId?: string;
   editName?: string;
@@ -78,6 +80,7 @@ interface Props {
 
 export function Editor({
   url,
+  pageTitle,
   editVersionId,
   editName,
   baseVersionId,
@@ -169,8 +172,8 @@ export function Editor({
       const vName = nameRef.current.trim() || undefined;
       if (versionIdRef.current == null) {
         const res = baseVersionId
-          ? await Api.forkVersion(baseVersionId, { url, name: vName, patches: patchSet })
-          : await Api.createVersion({ url, name: vName, patches: patchSet });
+          ? await Api.forkVersion(baseVersionId, { url, title: pageTitle, name: vName, patches: patchSet })
+          : await Api.createVersion({ url, title: pageTitle, name: vName, patches: patchSet });
         versionIdRef.current = res.id;
         // Show the server's (possibly auto-generated) name so the user can see and
         // edit it. Doesn't mark dirty, so it won't trigger another save by itself.

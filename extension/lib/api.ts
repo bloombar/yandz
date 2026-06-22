@@ -127,8 +127,11 @@ export const Api = {
       body: JSON.stringify({ idToken, handle }),
     }),
 
-  getVersionsForUrl: (url: string, sort: 'foryou' | 'latest' = 'foryou') =>
-    api<PageVersions>(`/pages?url=${encodeURIComponent(url)}&sort=${sort}`),
+  getVersionsForUrl: (url: string, sort: 'foryou' | 'latest' = 'foryou', title?: string) =>
+    api<PageVersions>(
+      `/pages?url=${encodeURIComponent(url)}&sort=${sort}` +
+        (title ? `&title=${encodeURIComponent(title)}` : ''),
+    ),
 
   // Global (or this-page) feed. `url` is the active tab's URL for scope/comparison.
   getFeed: (sort: FeedSort, scope: FeedScope, url?: string) =>
@@ -153,7 +156,7 @@ export const Api = {
   createVersion: (input: { url: string; title?: string; name?: string; patches: AnyPatch[] }) =>
     api<{ id: string; name: string }>('/versions', { method: 'POST', body: JSON.stringify(input) }),
 
-  forkVersion: (id: string, input: { url: string; name?: string; patches: AnyPatch[] }) =>
+  forkVersion: (id: string, input: { url: string; title?: string; name?: string; patches: AnyPatch[] }) =>
     api<{ id: string; name: string; parentVersionId: string }>(`/versions/${id}/fork`, {
       method: 'POST',
       body: JSON.stringify(input),
