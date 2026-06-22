@@ -32,8 +32,15 @@ export class PatchEngine {
   private applied: AppliedRecord[] = [];
   private styleEl: HTMLStyleElement | null = null;
 
-  /** Apply a full patch list; returns counts + any unresolved patches. */
-  apply(patches: AnyPatch[], doc: Document = document): ApplyOutcome {
+  /**
+   * Apply a full patch list; returns counts + any unresolved patches.
+   *
+   * `assetUrls` optionally maps an imageSwap's original (validated http/https)
+   * asset URL to a display URL actually set on the <img> — used to inline a
+   * proxied image as a `data:` URL. Validation still runs against the ORIGINAL
+   * url (the validator rightly rejects `data:`), so the swap isn't dropped.
+   */
+  apply(patches: AnyPatch[], doc: Document = document, assetUrls?: Map<string, string>): ApplyOutcome {
     const unresolved: AnyPatch[] = [];
     let applied = 0;
     for (const patch of [...patches].sort((a, b) => a.order - b.order)) {
@@ -43,7 +50,7 @@ export class PatchEngine {
         continue;
       }
       const match = matchTarget(patch.target, doc);
-      const ok = this.applyOne(patch, match, doc);
+      const ok = this.applyOne(patch, match, doc, assetUrls);
       if (ok) applied++;
       else unresolved.push(patch);
     }
@@ -59,7 +66,7 @@ export class PatchEngine {
   }
 
   /** Apply a single patch; returns false if it couldn't be resolved/applied. */
-  private applyOne(patch: AnyPatch, match: MatchResult, doc: Document): boolean {
+  private applyOne(patch: AnyPatch, match: MatchResult, doc: Document, assetUrls?: Map<string, string>): boolean {
     // cssOverride is the one op that doesn't strictly need a resolved element if a
     // selector is present — it's injected as a scoped stylesheet.
     if (patch.op === 'cssOverride') return this.applyCss(patch as Patch<'cssOverride'>, doc);
@@ -88,7 +95,9 @@ export class PatchEngine {
           : [];
         const prevSources = sources.map((s) => ({ s, srcset: s.getAttribute('srcset') }));
         sources.forEach((s) => s.removeAttribute('srcset'));
-        el.src = patch.payload.newAssetUrl;
+        // Use the inlined (proxied) URL for display when provided; the patch itself
+        // still carries the original http(s) URL that passed validation above.
+        el.src = assetUrls?.get(patch.payload.newAssetUrl) ?? patch.payload.newAssetUrl;
         this.applied.push({
           undo: () => {
             if (prevSrc === null) el.removeAttribute('src');

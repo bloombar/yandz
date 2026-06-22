@@ -104,17 +104,22 @@ async function resolveAssetUrl(url: string): Promise<string> {
   return dataUrl ?? url;
 }
 
-/** Rewrite imageSwap patches whose asset the page can't load to inline data: URLs. */
-async function resolvePatches(patches: AnyPatch[]): Promise<AnyPatch[]> {
-  return Promise.all(
+/**
+ * Build a map of imageSwap asset URL → loadable display URL (a data: URL) for any
+ * asset the page can't fetch directly. Patches are NOT rewritten — the original
+ * http(s) URL must survive so the applier's re-validation passes (it rejects
+ * data:); the map is handed to engine.apply for display only.
+ */
+async function resolveAssets(patches: AnyPatch[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  await Promise.all(
     patches.map(async (p) => {
-      if (p.op === 'imageSwap') {
-        const resolved = await resolveAssetUrl(p.payload.newAssetUrl);
-        if (resolved !== p.payload.newAssetUrl) return { ...p, payload: { ...p.payload, newAssetUrl: resolved } };
-      }
-      return p;
+      if (p.op !== 'imageSwap') return;
+      const resolved = await resolveAssetUrl(p.payload.newAssetUrl);
+      if (resolved !== p.payload.newAssetUrl) map.set(p.payload.newAssetUrl, resolved);
     }),
   );
+  return map;
 }
 
 /** Capture the editable state of a picked element so the panel can prefill an editor. */
@@ -136,9 +141,10 @@ export default defineContentScript({
     const engine = new PatchEngine();
     const overlay = new OverlayRenderer();
     let current: VersionSummary | null = null;
-    // The resolved patches actually applied to the DOM (image URLs inlined as
-    // data: where needed). The MutationObserver re-applies THIS, not the raw set.
+    // The patches currently applied to the DOM, plus the asset map (original image
+    // URL → inlined data: URL) for display. The MutationObserver re-applies THESE.
     let currentPatches: AnyPatch[] = [];
+    let currentAssets: Map<string, string> = new Map();
     // Holds the fetched versions once loaded (null until then / on failure).
     let data: PageVersions | null = null;
     // Stops the active page-side tool (drawing), so it can be torn down when the
@@ -168,11 +174,11 @@ export default defineContentScript({
     async function applyPatches(patches: AnyPatch[]): Promise<void> {
       engine.revertAll();
       overlay.clear();
-      const resolved = await resolvePatches(patches);
-      currentPatches = resolved;
-      if (resolved.length) {
-        engine.apply(resolved);
-        overlay.render(resolved);
+      currentPatches = patches;
+      currentAssets = await resolveAssets(patches);
+      if (patches.length) {
+        engine.apply(patches, document, currentAssets);
+        overlay.render(patches);
       }
       if (current) current = { ...current, patches: patches as VersionSummary['patches'] };
     }
@@ -183,11 +189,12 @@ export default defineContentScript({
       overlay.clear();
       current = version;
       currentPatches = [];
+      currentAssets = new Map();
       if (version) {
-        const resolved = await resolvePatches(version.patches);
-        currentPatches = resolved;
-        engine.apply(resolved);
-        overlay.render(resolved); // drawings + annotations
+        currentPatches = version.patches;
+        currentAssets = await resolveAssets(version.patches);
+        engine.apply(version.patches, document, currentAssets);
+        overlay.render(version.patches); // drawings + annotations
       }
       notifyApplied();
     }
@@ -206,7 +213,7 @@ export default defineContentScript({
         raf = 0;
         // Re-assert whatever is currently applied (an active version OR an editor
         // preview). Don't fight the user's in-place typing by re-applying over it.
-        if (currentPatches.length && !isInlineEditing()) engine.apply(currentPatches);
+        if (currentPatches.length && !isInlineEditing()) engine.apply(currentPatches, document, currentAssets);
       });
     });
     if (document.documentElement) {
