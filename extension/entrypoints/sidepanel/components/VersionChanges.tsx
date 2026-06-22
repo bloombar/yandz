@@ -7,10 +7,10 @@
 import React, { useState } from 'react';
 import { GitFork } from 'lucide-react';
 import type { FeedItem } from '../../../lib/api.js';
-import { describePatch } from '../../../lib/describe-patch.js';
 import { PanelHeader } from './PanelHeader.js';
 import { PanelTabs, type VersionTab } from './PanelTabs.js';
 import { CommentBoard } from './CommentBoard.js';
+import { ChangeItem } from './ChangeItem.js';
 
 interface Props {
   version: FeedItem;
@@ -61,16 +61,11 @@ export function VersionChanges({
               .map((p, i) => ({ p, i }))
               .reverse()
               .map(({ p, i }) => (
-                <div className="change-row" key={i}>
-                  <span
-                    className="change-desc"
-                    role="button"
-                    title="Highlight on the page"
-                    onClick={() => void messageTab({ type: 'yandz:highlight-element', target: p.target })}
-                  >
-                    {describePatch(p)}
-                  </span>
-                </div>
+                <ChangeItem
+                  key={i}
+                  patch={p}
+                  onHighlight={() => void messageTab({ type: 'yandz:highlight-element', target: p.target })}
+                />
               ))}
             {v.patches.length === 0 && <p className="muted">No changes.</p>}
           </>

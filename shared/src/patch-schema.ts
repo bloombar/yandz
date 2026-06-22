@@ -58,7 +58,8 @@ export interface PatchPayloadMap {
   textReplace: { from: string; to: string };
   imageSwap: { originalSrcHash: string; newAssetUrl: string };
   cssOverride: { declarations: Record<string, string> };
-  attrChange: { attr: string; value: string };
+  /** `from` is the original attribute value (for display/diff), if any. */
+  attrChange: { attr: string; value: string; from?: string };
   drawingOverlay: { strokes: DrawingStroke[] };
   annotation: { kind: AnnotationKind; color: string; body?: string };
 }

@@ -8,14 +8,13 @@
  * otherwise it creates a brand-new version.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Trash2 } from 'lucide-react';
 import { browser } from 'wxt/browser';
 import { Api } from '../../../lib/api.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../../lib/config.js';
-import { describePatch } from '../../../lib/describe-patch.js';
 import { PanelHeader } from './PanelHeader.js';
 import { PanelTabs, type VersionTab } from './PanelTabs.js';
 import { CommentBoard } from './CommentBoard.js';
+import { ChangeItem } from './ChangeItem.js';
 import type { AnyPatch, ElementTarget, DrawingStroke } from '@yandz/shared';
 
 /** Auto-save lifecycle, surfaced as discrete status text near the Done button. */
@@ -299,24 +298,12 @@ export function Editor({
             .map((p, i) => ({ p, i }))
             .reverse()
             .map(({ p, i }) => (
-              <div className="change-row" key={i}>
-                <span
-                  className="change-desc"
-                  role="button"
-                  title="Highlight on the page"
-                  onClick={() => void messageTab({ type: 'yandz:highlight-element', target: p.target })}
-                >
-                  {describePatch(p)}
-                </span>
-                <button
-                  className="icon-btn"
-                  aria-label="Delete this change"
-                  title="Delete this change"
-                  onClick={() => removePatch(i)}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
+              <ChangeItem
+                key={i}
+                patch={p}
+                onHighlight={() => void messageTab({ type: 'yandz:highlight-element', target: p.target })}
+                onDelete={() => removePatch(i)}
+              />
             ))}
           {patches.length === 0 && (
             <p className="muted" style={{ marginTop: 8 }}>
@@ -399,7 +386,14 @@ function PickedEditor({
       </div>
       <button
         className="btn"
-        onClick={() => onAdd({ op: 'attrChange', target: picked.target, payload: { attr, value: attrVal } })}
+        onClick={() =>
+          onAdd({
+            op: 'attrChange',
+            target: picked.target,
+            // Capture the element's current value of this attribute for the diff.
+            payload: { attr, value: attrVal, from: picked.snapshot.attrs[attr] },
+          })
+        }
       >
         Set attribute
       </button>
