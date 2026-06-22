@@ -128,6 +128,21 @@ test('per-change scope applies site/global patches across pages for the author o
     await page.waitForTimeout(3000);
     expect((await h1State(page)).title, 'demoted patch no longer applies off original host').toBeNull();
     console.log('[e2e] after demote: global gone off-host ✓');
+
+    // "Revert to original" clears the personal layer too. On the original host the
+    // (now site-scoped) patches apply; reverting must restore the pristine page.
+    await page.goto(SAME_HOST_OTHER_PAGE, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await expect.poll(async () => (await h1State(page)).text, { timeout: 45_000 }).toBe('SITE-SCOPED');
+    const tabId = await sw.evaluate(async () => {
+      const tabs = await (globalThis as any).chrome.tabs.query({});
+      return tabs.find((t: any) => t.url?.includes('example.com'))?.id as number;
+    });
+    await sw.evaluate(async (id: number) => {
+      await (globalThis as any).chrome.tabs.sendMessage(id, { type: 'yandz:revert' });
+    }, tabId);
+    await expect.poll(async () => (await h1State(page)).text, { message: 'revert restores original h1', timeout: 30_000 }).toBe(ORIGINAL_H1);
+    expect((await h1State(page)).title, 'revert clears the personal global/site layer').toBeNull();
+    console.log('[e2e] revert clears personal layer ✓');
   } finally {
     await ctx.close();
   }

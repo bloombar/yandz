@@ -224,6 +224,19 @@ export default defineContentScript({
       notifyApplied();
     }
 
+    /** "Revert to original": clear EVERYTHING on the page — the active version AND the
+     *  personal site/global layer — so the user sees the page as published. Transient
+     *  (personalPatches is kept, so re-applying a version layers them back; the next
+     *  page load re-applies them too). Permanent removal is done via account settings. */
+    function revertToOriginal(): void {
+      engine.revertAll();
+      overlay.clear();
+      current = null;
+      currentPatches = [];
+      currentAssets = new Map();
+      notifyApplied();
+    }
+
     // IMPORTANT: register the message listener and the MutationObserver
     // UNCONDITIONALLY (before any early exit), so the editor's "Pick element" /
     // "Draw" work even on pages that have no modifications yet — i.e. when you're
@@ -267,7 +280,7 @@ export default defineContentScript({
           break;
         }
         case 'yandz:revert':
-          void applyVersion(null);
+          revertToOriginal();
           break;
         case 'yandz:grant-consent':
           void browser.storage.local.set({ [consentKey]: true });
