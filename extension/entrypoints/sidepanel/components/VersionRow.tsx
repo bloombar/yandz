@@ -50,16 +50,16 @@ export function VersionRow({
   const isAuthor = !!currentUserId && currentUserId === v.author.id;
   return (
     <div className="version-row">
-      {/* Top line: title (apply) + comment / bookmark / share icons. */}
+      {/* Top line: the PAGE TITLE (prominent, link-like) + comment/bookmark/share. */}
       <div className="vr-line">
         <div
-          className="version-title"
+          className="page-link"
           role="button"
           aria-pressed={active}
           title="Apply this modification to the page"
           onClick={() => onApply(v)}
         >
-          {active && <Check size={12} style={{ verticalAlign: 'middle' }} />} {v.name}
+          {active && <Check size={12} style={{ verticalAlign: 'middle' }} />} {v.page.title || 'Untitled page'}
         </div>
         <div className="row-actions">
           <button className="icon-btn" title="Comments" onClick={() => onOpenComments(v)}>
@@ -100,9 +100,13 @@ export function VersionRow({
         </div>
       </div>
 
-      {/* The page each version modifies — always shown for global-feed context. */}
-      <div className="muted page-ref" title={v.page.urlKey}>
-        {v.page.title || 'Untitled page'} · {shortUrl(v.page.urlKey)}
+      {/* Secondary line: the version's own title (gray, less prominent) + the site
+          URL (muted). Both are clickable to apply, but not styled as links. */}
+      <div className="muted vr-sub" title={v.page.urlKey}>
+        <span className="version-name" role="button" onClick={() => onApply(v)}>
+          {v.name}
+        </span>{' '}
+        · <span className="url-text" role="button" onClick={() => onApply(v)}>{shortUrl(v.page.urlKey)}</span>
       </div>
 
       {/* Bottom line: author/date (left) + votes (down · net · up), right-aligned
