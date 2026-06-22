@@ -3,7 +3,13 @@
  * (endpoint + forcePathStyle) and AWS S3 in prod. Uploads use presigned PUT URLs
  * so bytes go directly client→storage; reads go via the public/CDN base URL.
  */
-import { S3Client, PutObjectCommand, CreateBucketCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  CreateBucketCommand,
+  HeadBucketCommand,
+  PutBucketPolicyCommand,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config.js';
 
@@ -14,12 +20,35 @@ export const s3 = new S3Client({
   credentials: { accessKeyId: config.s3.accessKeyId, secretAccessKey: config.s3.secretAccessKey },
 });
 
-/** Ensure the bucket exists (dev/MinIO convenience; no-op if already present). */
+/**
+ * Ensure the bucket exists and (in dev/MinIO) that its objects are publicly
+ * readable, so swapped images load via a plain <img src> with no credentials.
+ * Objects are uploaded via presigned PUT with no ACL, so without this the public
+ * GET would 403 and the image silently fails to appear. In prod (real S3, no
+ * custom endpoint) public access is managed by the deployment / CloudFront, so
+ * we don't force a bucket policy there.
+ */
 export async function ensureBucket(): Promise<void> {
   try {
     await s3.send(new HeadBucketCommand({ Bucket: config.s3.bucket }));
   } catch {
     await s3.send(new CreateBucketCommand({ Bucket: config.s3.bucket }));
+  }
+  if (config.s3.endpoint) {
+    const policy = {
+      Version: '2012-10-17',
+      Statement: [
+        {
+          Effect: 'Allow',
+          Principal: '*',
+          Action: ['s3:GetObject'],
+          Resource: [`arn:aws:s3:::${config.s3.bucket}/*`],
+        },
+      ],
+    };
+    await s3
+      .send(new PutBucketPolicyCommand({ Bucket: config.s3.bucket, Policy: JSON.stringify(policy) }))
+      .catch((err) => console.warn('public-read policy skipped:', (err as Error).message));
   }
 }
 

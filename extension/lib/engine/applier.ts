@@ -78,9 +78,25 @@ export class PatchEngine {
       }
       case 'imageSwap': {
         if (!(el instanceof HTMLImageElement)) return false;
-        const prev = el.src;
+        const prevSrc = el.getAttribute('src');
+        const prevSrcset = el.getAttribute('srcset');
+        // `srcset` (and <picture> <source> srcset) takes precedence over `src`, so we
+        // must clear it for the swap to actually take effect on responsive images.
+        el.removeAttribute('srcset');
+        const sources = el.closest('picture')
+          ? Array.from(el.closest('picture')!.querySelectorAll('source'))
+          : [];
+        const prevSources = sources.map((s) => ({ s, srcset: s.getAttribute('srcset') }));
+        sources.forEach((s) => s.removeAttribute('srcset'));
         el.src = patch.payload.newAssetUrl;
-        this.applied.push({ undo: () => (el.src = prev) });
+        this.applied.push({
+          undo: () => {
+            if (prevSrc === null) el.removeAttribute('src');
+            else el.setAttribute('src', prevSrc);
+            if (prevSrcset !== null) el.setAttribute('srcset', prevSrcset);
+            prevSources.forEach(({ s, srcset }) => srcset !== null && s.setAttribute('srcset', srcset));
+          },
+        });
         return true;
       }
       case 'attrChange': {

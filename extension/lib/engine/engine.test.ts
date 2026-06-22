@@ -135,6 +135,23 @@ describe('PatchEngine apply/revert', () => {
     expect(document.querySelector('#i')?.getAttribute('alt')).toBe('old');
   });
 
+  it('swaps an image and clears srcset so the new src takes effect', () => {
+    setBody('<img id="i" src="old.jpg" srcset="old-2x.jpg 2x" alt="">');
+    const patch: AnyPatch = {
+      op: 'imageSwap',
+      target: { cssSelector: '#i' },
+      order: 0,
+      payload: { originalSrcHash: 'h', newAssetUrl: 'https://cdn.example.com/new.png' },
+    };
+    engine.apply([patch]);
+    const img = document.querySelector('#i') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('https://cdn.example.com/new.png');
+    expect(img.hasAttribute('srcset')).toBe(false);
+    engine.revertAll();
+    expect(img.getAttribute('src')).toBe('old.jpg');
+    expect(img.getAttribute('srcset')).toBe('old-2x.jpg 2x');
+  });
+
   it('marks a rejected (unsafe) patch as unresolved', () => {
     setBody('<a id="a">x</a>');
     const patch: AnyPatch = {
