@@ -281,26 +281,30 @@ export function Editor({
         {picked && <PickedEditor picked={picked} onAdd={addPatch} onSwapImage={swapImage} />}
 
         <h3 className="muted">Changes ({patches.length})</h3>
-        {patches.map((p, i) => (
-          <div className="change-row" key={i}>
-            <span
-              className="change-desc"
-              role="button"
-              title="Highlight on the page"
-              onClick={() => void messageTab({ type: 'yandz:highlight-element', target: p.target })}
-            >
-              {describePatch(p)}
-            </span>
-            <button
-              className="icon-btn"
-              aria-label="Delete this change"
-              title="Delete this change"
-              onClick={() => removePatch(i)}
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
-        ))}
+        {/* Newest change first; keep the real array index for delete/highlight. */}
+        {patches
+          .map((p, i) => ({ p, i }))
+          .reverse()
+          .map(({ p, i }) => (
+            <div className="change-row" key={i}>
+              <span
+                className="change-desc"
+                role="button"
+                title="Highlight on the page"
+                onClick={() => void messageTab({ type: 'yandz:highlight-element', target: p.target })}
+              >
+                {describePatch(p)}
+              </span>
+              <button
+                className="icon-btn"
+                aria-label="Delete this change"
+                title="Delete this change"
+                onClick={() => removePatch(i)}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
         {patches.length === 0 && (
           <p className="muted" style={{ marginTop: 8 }}>
             Use the select-element or draw tool above to make a change. Changes auto-save.
