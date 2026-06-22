@@ -39,6 +39,8 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 /* Compact, row-like feed item: bottom border only, no card chrome. Stacked lines:
    [title ........ actions] / page-ref / [author/date ........ votes]. */
 .version-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-bottom: 1px solid #8883; }
+/* The currently-applied version is highlighted in the list. */
+.version-row.active { background: #4c9ffe22; box-shadow: inset 3px 0 0 #4c9ffe; }
 .vr-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .vr-line > .page-link, .vr-line > .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 /* Page title — unstyled plain text (clickable to apply, but not link-like). */

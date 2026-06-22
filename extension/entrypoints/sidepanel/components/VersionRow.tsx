@@ -49,7 +49,7 @@ export function VersionRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const isAuthor = !!currentUserId && currentUserId === v.author.id;
   return (
-    <div className="version-row">
+    <div className={`version-row ${active ? 'active' : ''}`}>
       {/* Top line: the PAGE TITLE (prominent, link-like) + comment/bookmark/share. */}
       <div className="vr-line">
         <div
