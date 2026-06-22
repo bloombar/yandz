@@ -70,6 +70,10 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 /* Discussion context (which version of which page the comments are about). */
 .comment-context { padding: 8px 12px; border-bottom: 1px solid #8883; margin-bottom: 8px; }
 .version-title-static { font-weight: 600; }
+/* Editor "Changes" list: clipped description (click → highlight) + delete icon. */
+.change-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #8882; }
+.change-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.change-desc:hover { text-decoration: underline; }
 .error { color: #e11; }
 .save-status { font-size: 11px; font-style: italic; }
 .diff-add { background: #2ecc7133; }

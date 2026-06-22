@@ -28,6 +28,25 @@ async function getVersions(url: string): Promise<PageVersions | null> {
 }
 import { PatchEngine } from '../lib/engine/applier.js';
 import { fingerprintElement } from '../lib/engine/fingerprint.js';
+import { matchTarget } from '../lib/engine/matcher.js';
+import type { ElementTarget } from '@yandz/shared';
+
+/** Briefly highlight (and scroll to) an element matched from a patch target. */
+function flashHighlight(target: ElementTarget): void {
+  const { element } = matchTarget(target);
+  if (!element) return;
+  element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const r = element.getBoundingClientRect();
+  const box = document.createElement('div');
+  box.id = 'yandz-flash';
+  box.style.cssText =
+    `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;` +
+    'border:2px solid #4c9ffe;background:rgba(76,159,254,.2);border-radius:2px;' +
+    'z-index:2147483646;pointer-events:none;transition:opacity .3s;';
+  document.documentElement.appendChild(box);
+  setTimeout(() => (box.style.opacity = '0'), 1200);
+  setTimeout(() => box.remove(), 1600);
+}
 import { mountFloatingIcon } from '../lib/ui/floating-icon.js';
 import { startPicker, hasOwnText } from '../lib/ui/picker.js';
 import { OverlayRenderer } from '../lib/ui/overlay-renderer.js';
@@ -129,6 +148,10 @@ export default defineContentScript({
           // Editor closed (or switched away) — tear down any active drawing layer.
           activeStop?.();
           activeStop = null;
+          break;
+        case 'yandz:highlight-element':
+          // Clicking a change in the editor flashes its element on the page.
+          flashHighlight(msg.target);
           break;
         case 'yandz:start-picker':
           activeStop?.(); // stop any active drawing first

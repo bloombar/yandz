@@ -31,7 +31,13 @@ type View =
   | { name: 'feed' }
   | { name: 'profile'; userId: string }
   | { name: 'comments'; version: FeedItem }
-  | { name: 'editor'; baseVersionId?: string; baseAuthorHandle?: string; initialTool?: 'pick' | 'draw' }
+  | {
+      name: 'editor';
+      baseVersionId?: string;
+      baseAuthorHandle?: string;
+      baseName?: string;
+      initialTool?: 'pick' | 'draw';
+    }
   | { name: 'settings' };
 
 type TabKey = 'foryou' | 'latest' | 'bookmarks';
@@ -217,6 +223,7 @@ export function App(): React.JSX.Element {
         name: 'editor',
         baseVersionId: selectedId ?? undefined,
         baseAuthorHandle: base?.author.handle,
+        baseName: base?.name,
         initialTool: tool,
       });
     }
@@ -334,6 +341,7 @@ export function App(): React.JSX.Element {
           url={url}
           baseVersionId={view.baseVersionId}
           baseAuthorHandle={view.baseAuthorHandle}
+          baseName={view.baseName}
           initialTool={view.initialTool}
           messageTab={messageTab}
           onSaved={async (newId) => {

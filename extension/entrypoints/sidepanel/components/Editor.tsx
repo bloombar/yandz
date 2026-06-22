@@ -8,6 +8,7 @@
  * otherwise it creates a brand-new version.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { browser } from 'wxt/browser';
 import { Api } from '../../../lib/api.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../../lib/config.js';
@@ -16,6 +17,28 @@ import type { AnyPatch, ElementTarget, DrawingStroke } from '@yandz/shared';
 
 /** Auto-save lifecycle, surfaced as discrete status text near the Done button. */
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
+
+const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+/** Human-friendly summary of a change: a text preview, or a description of the op. */
+function describePatch(p: AnyPatch): string {
+  switch (p.op) {
+    case 'textReplace':
+      return `Text: “${clip(p.payload.to ?? '', 40)}”`;
+    case 'imageSwap':
+      return 'Image swap';
+    case 'cssOverride':
+      return 'Style change';
+    case 'attrChange':
+      return `Set ${p.payload.attr}`;
+    case 'drawingOverlay':
+      return 'Drawing overlay';
+    case 'annotation':
+      return p.payload.kind === 'highlight' ? 'Highlight' : `Note: “${clip(p.payload.body ?? '', 30)}”`;
+    default:
+      return (p as AnyPatch).op;
+  }
+}
 
 interface PickedMessage {
   type: 'yandz:element-picked';
@@ -37,8 +60,10 @@ type EditorMessage = PickedMessage | DrawMessage | TextEditedMessage;
 interface Props {
   url: string;
   baseVersionId?: string;
-  /** Handle of the base version's author, shown in the header ("Based on u/x's"). */
+  /** Handle of the base version's author, shown in the header ("based on … by u/x"). */
   baseAuthorHandle?: string;
+  /** Title of the base version, shown in the header. */
+  baseName?: string;
   /** Tool to auto-start on mount, when launched from a top-nav tool icon. */
   initialTool?: 'pick' | 'draw';
   /** Returns false when the content script isn't reachable on the active tab. */
@@ -52,6 +77,7 @@ export function Editor({
   url,
   baseVersionId,
   baseAuthorHandle,
+  baseName,
   initialTool,
   messageTab,
   onSaved,
@@ -90,6 +116,12 @@ export function Editor({
   const addPatch = (p: Omit<AnyPatch, 'order'>) => {
     dirtyRef.current = true;
     setPatches((prev) => [...prev, { ...p, order: prev.length } as AnyPatch]);
+  };
+
+  /** Remove a single change; the debounced auto-save then persists the rest. */
+  const removePatch = (index: number) => {
+    dirtyRef.current = true;
+    setPatches((prev) => prev.filter((_, i) => i !== index));
   };
 
   // When starting from another user's version, preload its patches as the base so the
@@ -228,9 +260,15 @@ export function Editor({
 
   return (
     <div className="list">
-      {/* The X flushes the pending auto-save, then returns to the list. */}
+      {/* Title (non-editable, auto-named) + attribution. The X flushes the pending
+          auto-save, then returns to the list. */}
       <PanelHeader
-        title={baseVersionId ? `Based on u/${baseAuthorHandle ?? 'another'}'s` : 'New version'}
+        title={
+          `“${name || 'New version'}”` +
+          (baseVersionId
+            ? `, based on “${baseName ?? 'a version'}” by u/${baseAuthorHandle ?? 'another'}`
+            : '')
+        }
         onClose={() => void done()}
       />
 
@@ -242,22 +280,27 @@ export function Editor({
 
         {picked && <PickedEditor picked={picked} onAdd={addPatch} onSwapImage={swapImage} />}
 
-        <h3 className="muted">Pending changes ({patches.length})</h3>
+        <h3 className="muted">Changes ({patches.length})</h3>
         {patches.map((p, i) => (
-          <div className="card" key={i}>
-            <code>{p.op}</code> <span className="muted">{p.target.cssSelector ?? p.target.domPath}</span>
+          <div className="change-row" key={i}>
+            <span
+              className="change-desc"
+              role="button"
+              title="Highlight on the page"
+              onClick={() => void messageTab({ type: 'yandz:highlight-element', target: p.target })}
+            >
+              {describePatch(p)}
+            </span>
+            <button
+              className="icon-btn"
+              aria-label="Delete this change"
+              title="Delete this change"
+              onClick={() => removePatch(i)}
+            >
+              <Trash2 size={14} />
+            </button>
           </div>
         ))}
-
-        <input
-          style={{ marginTop: 8 }}
-          placeholder="Name (auto-generated if left blank)"
-          value={name}
-          onChange={(e) => {
-            dirtyRef.current = true;
-            setName(e.target.value);
-          }}
-        />
         {patches.length === 0 && (
           <p className="muted" style={{ marginTop: 8 }}>
             Use the select-element or draw tool above to make a change. Changes auto-save.
