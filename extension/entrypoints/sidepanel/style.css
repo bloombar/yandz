@@ -38,7 +38,8 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 
 /* Compact, row-like feed item: bottom border only, no card chrome. Stacked lines:
    [title ........ actions] / page-ref / [author/date ........ votes]. */
-.version-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-bottom: 1px solid #8883; }
+.version-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-bottom: 1px solid #8883; cursor: pointer; }
+.version-row:hover { background: #8881; }
 /* The currently-applied version is highlighted in the list. */
 .version-row.active { background: #4c9ffe22; box-shadow: inset 3px 0 0 #4c9ffe; }
 .vr-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -68,7 +69,8 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 /* Net score tinted to match the viewer's own vote. */
 .vote-up-text { color: #2ecc71; }
 .vote-down-text { color: #e74c3c; }
-.icon-btn .count { font-size: 11px; color: #8889; }
+/* Comment count matches the comments icon color (inherits, not muted). */
+.icon-btn .count { font-size: 11px; }
 /* Panel header with top-right close icon. */
 .panel-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #8883; }
 .profile-name { display: inline-flex; align-items: center; gap: 4px; }

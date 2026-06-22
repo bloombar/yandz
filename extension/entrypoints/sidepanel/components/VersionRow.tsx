@@ -54,49 +54,47 @@ export function VersionRow({
 }: Props): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const isAuthor = !!currentUserId && currentUserId === v.author.id;
+  // Sub-controls call stop() so they don't also trigger the row's "apply" click.
+  const stop = (fn: () => void) => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    fn();
+  };
   return (
-    <div className={`version-row ${active ? 'active' : ''}`}>
-      {/* Top line: the PAGE TITLE (prominent, link-like) + comment/bookmark/share. */}
+    <div
+      className={`version-row ${active ? 'active' : ''}`}
+      role="button"
+      title="Apply this modification to the page"
+      onClick={() => onApply(v)}
+    >
+      {/* Top line: the PAGE TITLE (prominent) + comment/bookmark/share. */}
       <div className="vr-line">
-        <div
-          className="page-link"
-          role="button"
-          aria-pressed={active}
-          title="Apply this modification to the page"
-          onClick={() => onApply(v)}
-        >
+        <div className="page-link" aria-pressed={active}>
           {active && <Check size={12} style={{ verticalAlign: 'middle' }} />} {v.page.title || 'Untitled page'}
         </div>
         <div className="row-actions">
-          <button className="icon-btn" title="Comments" onClick={() => onOpenComments(v)}>
+          <button className="icon-btn" title="Comments" onClick={stop(() => onOpenComments(v))}>
             <MessageSquare size={14} />
             <span className="count">{v.commentCount}</span>
           </button>
           <button
             className={`icon-btn ${v.bookmarked ? 'active' : ''}`}
             title={v.bookmarked ? 'Remove bookmark' : 'Bookmark'}
-            onClick={() => onToggleBookmark(v)}
+            onClick={stop(() => onToggleBookmark(v))}
           >
             <Bookmark size={14} fill={v.bookmarked ? 'currentColor' : 'none'} />
           </button>
-          <button className="icon-btn" title="Share" onClick={() => onShare(v)}>
+          <button className="icon-btn" title="Share" onClick={stop(() => onShare(v))}>
             <Share2 size={14} />
           </button>
           {/* Author-only menu (same kebab style as block/mute) with Delete. */}
           {isAuthor && (
             <div className="kebab">
-              <button className="icon-btn" aria-label="More" title="More" onClick={() => setMenuOpen((o) => !o)}>
+              <button className="icon-btn" aria-label="More" title="More" onClick={stop(() => setMenuOpen((o) => !o))}>
                 <MoreVertical size={14} />
               </button>
               {menuOpen && (
                 <div className="kebab-menu" onMouseLeave={() => setMenuOpen(false)}>
-                  <button
-                    className="kebab-item"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onDelete(v);
-                    }}
-                  >
+                  <button className="kebab-item" onClick={stop(() => { setMenuOpen(false); onDelete(v); })}>
                     Delete
                   </button>
                 </div>
@@ -106,23 +104,18 @@ export function VersionRow({
         </div>
       </div>
 
-      {/* Secondary line: the version's own title (gray, less prominent) + the site
-          URL (muted). Both are clickable to apply, but not styled as links. */}
+      {/* Secondary line: version title (link) + site URL + changes link. */}
       <div className="muted vr-sub" title={v.page.urlKey}>
-        <span className="version-name" role="button" onClick={() => onApply(v)}>
-          {v.name}
-        </span>{' '}
-        · <span className="url-text" role="button" onClick={() => onApply(v)}>{shortUrl(v.page.urlKey)}</span> ·{' '}
-        <span className="changes-link" role="button" title="View this version's changes" onClick={() => onOpenChanges(v)}>
+        <span className="version-name">{v.name}</span> · <span className="url-text">{shortUrl(v.page.urlKey)}</span> ·{' '}
+        <span className="changes-link" role="button" title="View this version's changes" onClick={stop(() => onOpenChanges(v))}>
           {v.patches.length} change{v.patches.length === 1 ? '' : 's'}
         </span>
       </div>
 
-      {/* Bottom line: author/date (left) + votes (down · net · up), right-aligned
-          under the action icons. */}
+      {/* Bottom line: author/date (left) + votes (down · net · up), right-aligned. */}
       <div className="vr-line">
         <div className="muted">
-          <span className="handle" onClick={() => onOpenProfile(v.author.id)}>
+          <span className="handle" onClick={stop(() => onOpenProfile(v.author.id))}>
             u/{v.author.handle}
           </span>{' '}
           · {new Date(v.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
@@ -130,7 +123,7 @@ export function VersionRow({
             <>
               {' '}
               · <GitFork size={11} style={{ verticalAlign: 'middle' }} /> based on{' '}
-              <span className="handle" onClick={() => onOpenProfile(v.parentAuthor!.id)}>
+              <span className="handle" onClick={stop(() => onOpenProfile(v.parentAuthor!.id))}>
                 u/{v.parentAuthor.handle}
               </span>
               ’s
@@ -138,7 +131,7 @@ export function VersionRow({
           )}
         </div>
         {/* Revealed on row hover; opens the details panel (smart default tab). */}
-        <span className="see-details" role="button" title="See details" onClick={() => onOpenDetails(v)}>
+        <span className="see-details" role="button" title="See details" onClick={stop(() => onOpenDetails(v))}>
           See details
         </span>
         <span className="votes">
@@ -146,7 +139,7 @@ export function VersionRow({
             className={`icon-btn vote-down ${v.myVote === -1 ? 'active' : ''}`}
             aria-label="downvote"
             aria-pressed={v.myVote === -1}
-            onClick={() => onVote(v, -1)}
+            onClick={stop(() => onVote(v, -1))}
           >
             <ChevronDown size={14} />
           </button>
@@ -158,7 +151,7 @@ export function VersionRow({
             className={`icon-btn vote-up ${v.myVote === 1 ? 'active' : ''}`}
             aria-label="upvote"
             aria-pressed={v.myVote === 1}
-            onClick={() => onVote(v, 1)}
+            onClick={stop(() => onVote(v, 1))}
           >
             <ChevronUp size={14} />
           </button>
