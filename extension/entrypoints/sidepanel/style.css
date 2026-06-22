@@ -41,15 +41,12 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .version-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-bottom: 1px solid #8883; }
 .vr-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .vr-line > .page-link, .vr-line > .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-/* Page title — prominent, link-like (the primary "which page" cue). */
-.page-link { color: #4c9ffe; font-weight: 600; cursor: pointer; }
-.page-link:hover { text-decoration: underline; }
-.page-link[aria-pressed="true"] { color: #2ecc71; }
-/* Secondary line: version name (gray, de-emphasized) + URL (muted). Clickable to
-   apply, but NOT styled as links. */
+/* Page title — unstyled plain text (clickable to apply, but not link-like). */
+.page-link { color: inherit; cursor: pointer; }
+/* Secondary line: version name (link-like) + URL (muted). Both clickable to apply. */
 .vr-sub, .page-ref { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Version title — prominent but a distinct accent (violet), not the link blue. */
-.version-name { color: #a371f7; font-weight: 600; cursor: pointer; }
+.version-name { color: #4c9ffe; cursor: pointer; }
+.version-name:hover { text-decoration: underline; }
 .url-text { color: #8889; cursor: pointer; }
 .row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .votes { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
