@@ -48,7 +48,8 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 /* Secondary line: version name (gray, de-emphasized) + URL (muted). Clickable to
    apply, but NOT styled as links. */
 .vr-sub, .page-ref { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.version-name { color: #8889; cursor: pointer; }
+/* Version title — prominent but a distinct accent (violet), not the link blue. */
+.version-name { color: #a371f7; font-weight: 600; cursor: pointer; }
 .url-text { color: #8889; cursor: pointer; }
 .row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .votes { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
