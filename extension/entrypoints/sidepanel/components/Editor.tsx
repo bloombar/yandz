@@ -59,6 +59,8 @@ interface Props {
   /** Called with the new version's id after a successful save. */
   onSaved: (newVersionId: string) => void;
   onClose: () => void;
+  /** Open a commenter's profile from the Comments tab. */
+  onOpenProfile: (userId: string) => void;
 }
 
 export function Editor({
@@ -74,6 +76,7 @@ export function Editor({
   messageTab,
   onSaved,
   onClose,
+  onOpenProfile,
 }: Props): React.JSX.Element {
   const [patches, setPatches] = useState<AnyPatch[]>([]);
   const [picked, setPicked] = useState<PickedMessage | null>(null);
@@ -277,7 +280,7 @@ export function Editor({
 
       {tab === 'comments' ? (
         <div className="panel-body">
-          <CommentBoard versionId={savedVersionId} />
+          <CommentBoard versionId={savedVersionId} onOpenProfile={onOpenProfile} />
         </div>
       ) : (
         <div className="panel-body">

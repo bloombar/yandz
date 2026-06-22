@@ -438,6 +438,7 @@ export function App(): React.JSX.Element {
             close();
             void refresh();
           }}
+          onOpenProfile={(userId) => push({ name: 'profile', userId })}
         />
       )}
     </div>

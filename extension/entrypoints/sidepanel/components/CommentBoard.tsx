@@ -4,6 +4,7 @@
  * versionId for a not-yet-saved version (commenting is disabled until it's saved).
  */
 import React, { useEffect, useMemo, useState } from 'react';
+import { Reply, X } from 'lucide-react';
 import { Api } from '../../../lib/api.js';
 import { subscribeToVersionComments, type LiveComment } from '../../../lib/realtime.js';
 
@@ -19,7 +20,13 @@ function buildTree(comments: LiveComment[]): Map<string | null, LiveComment[]> {
   return byParent;
 }
 
-export function CommentBoard({ versionId }: { versionId: string | null }): React.JSX.Element {
+export function CommentBoard({
+  versionId,
+  onOpenProfile,
+}: {
+  versionId: string | null;
+  onOpenProfile: (userId: string) => void;
+}): React.JSX.Element {
   const [comments, setComments] = useState<LiveComment[]>([]);
   const [draft, setDraft] = useState('');
   const [replyTo, setReplyTo] = useState<string | null>(null);
@@ -57,12 +64,16 @@ export function CommentBoard({ versionId }: { versionId: string | null }): React
 
   /** Recursively render a comment and its replies (indented). */
   const renderNode = (c: LiveComment, depth: number): React.JSX.Element => (
-    <div key={c.id} style={{ marginLeft: depth * 12, marginTop: 6 }}>
-      <div className="card" style={{ marginBottom: 0 }}>
-        <div className="muted">u/{c.author.handle}</div>
+    <div key={c.id} style={{ marginLeft: depth * 12 }}>
+      <div className="comment">
+        <div className="muted">
+          <span className="handle" onClick={() => onOpenProfile(c.author.id)}>
+            u/{c.author.handle}
+          </span>
+        </div>
         <div>{c.body}</div>
-        <button className="btn" style={{ marginTop: 4 }} onClick={() => setReplyTo(c.id)}>
-          Reply
+        <button className="icon-btn reply-btn" title="Reply" aria-label="Reply" onClick={() => setReplyTo(c.id)}>
+          <Reply size={13} />
         </button>
       </div>
       {(tree.get(c.id) ?? []).map((child) => renderNode(child, depth + 1))}
@@ -76,10 +87,16 @@ export function CommentBoard({ versionId }: { versionId: string | null }): React
 
       <form className="form" style={{ padding: 0, marginTop: 10 }} onSubmit={post}>
         {replyTo && (
-          <div className="muted">
-            Replying to a comment.{' '}
-            <button type="button" className="btn" onClick={() => setReplyTo(null)}>
-              Cancel
+          <div className="muted" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            Replying to a comment.
+            <button
+              type="button"
+              className="icon-btn"
+              title="Cancel reply"
+              aria-label="Cancel reply"
+              onClick={() => setReplyTo(null)}
+            >
+              <X size={13} />
             </button>
           </div>
         )}

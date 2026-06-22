@@ -80,6 +80,9 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .banner { background: #ffd86655; border: 1px solid #ffd866; border-radius: 8px; padding: 10px; margin: 8px 12px 0; }
 .form { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
 .form input { padding: 6px 8px; border: 1px solid #8884; border-radius: 6px; font: inherit; }
+/* Comments — flat (no card border), just spacing. */
+.comment { padding: 6px 0; }
+.comment .reply-btn { margin-top: 2px; color: #8889; }
 /* Discussion context (which version of which page the comments are about). */
 .comment-context { padding: 8px 12px; border-bottom: 1px solid #8883; margin-bottom: 8px; }
 .version-title-static { font-weight: 600; }

@@ -55,7 +55,7 @@ export function VersionChanges({
 
       <div className="panel-body">
         {tab === 'comments' ? (
-          <CommentBoard versionId={v.id} />
+          <CommentBoard versionId={v.id} onOpenProfile={onOpenProfile} />
         ) : (
           <>
             {v.patches
