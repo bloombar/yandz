@@ -13,10 +13,13 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .tabs { display: flex; gap: 16px; padding: 6px 12px 0; border-bottom: 1px solid #8883; }
 .tab { border: none; background: transparent; padding: 6px 2px; cursor: pointer; font: inherit; color: #8889; border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tab[aria-selected="true"] { color: inherit; border-bottom-color: #4c9ffe; font-weight: 600; }
-/* All ↔ This page scope toggle (pills). */
-.scope-toggle { display: flex; gap: 6px; padding: 8px 12px 0; }
+/* All ↔ This page scope toggle (pills, left) + revert/state link (right). */
+.scope-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px 0; }
+.pills { display: flex; gap: 6px; }
 .pill { border: 1px solid #8884; background: transparent; border-radius: 999px; padding: 2px 10px; cursor: pointer; font: 11px system-ui; color: #8889; }
 .pill.active { background: #4c9ffe; color: #fff; border-color: transparent; }
+.revert-link { color: #4c9ffe; cursor: pointer; font-size: 12px; }
+.revert-link:hover { text-decoration: underline; }
 /* Scroll container: no padding itself. Full-bleed rows (VersionRow) carry their
    own 12px inset; other panel content is wrapped in .panel-body for the same inset. */
 .list { flex: 1; overflow: auto; }

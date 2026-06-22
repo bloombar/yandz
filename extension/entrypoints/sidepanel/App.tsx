@@ -294,14 +294,32 @@ export function App(): React.JSX.Element {
             ))}
           </div>
 
-          {/* All ↔ This page scope toggle, only when a real web page is open. */}
+          {/* All ↔ This page scope toggle (left) + applied-state control (right),
+              only when a real web page is open. */}
           {isWebUrl(url) && (
             <div className="scope-toggle">
-              {(['all', 'page'] as const).map((s) => (
-                <button key={s} className={`pill ${scope === s ? 'active' : ''}`} onClick={() => setScope(s)}>
-                  {s === 'all' ? 'All' : 'This page'}
-                </button>
-              ))}
+              <div className="pills">
+                {(['all', 'page'] as const).map((s) => (
+                  <button key={s} className={`pill ${scope === s ? 'active' : ''}`} onClick={() => setScope(s)}>
+                    {s === 'all' ? 'All' : 'This page'}
+                  </button>
+                ))}
+              </div>
+              {selectedId ? (
+                <span
+                  className="revert-link"
+                  role="button"
+                  title="Revert to the original page"
+                  onClick={() => {
+                    setSelectedId(null);
+                    void messageTab({ type: 'yandz:revert' });
+                  }}
+                >
+                  Revert to original
+                </span>
+              ) : (
+                <span className="muted">Showing original</span>
+              )}
             </div>
           )}
 
@@ -316,18 +334,6 @@ export function App(): React.JSX.Element {
             </div>
           )}
 
-          {selectedId && (
-            <button
-              className="btn"
-              style={{ margin: '8px 12px 0' }}
-              onClick={() => {
-                setSelectedId(null);
-                void messageTab({ type: 'yandz:revert' });
-              }}
-            >
-              Revert to original
-            </button>
-          )}
           {shareNote && <div className="muted" style={{ margin: '6px 12px 0' }}>{shareNote}</div>}
 
           <div className="list">
