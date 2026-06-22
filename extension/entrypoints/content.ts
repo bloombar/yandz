@@ -73,6 +73,8 @@ export default defineContentScript({
     const engine = new PatchEngine();
     const overlay = new OverlayRenderer();
     let current: VersionSummary | null = null;
+    // Holds the fetched versions once loaded (null until then / on failure).
+    let data: PageVersions | null = null;
     // Stops the active page-side tool (drawing), so it can be torn down when the
     // editor closes or another tool starts.
     let activeStop: (() => void) | null = null;
@@ -81,6 +83,14 @@ export default defineContentScript({
     const consentKey = `consent:${location.origin}`;
     const hasConsent = async (): Promise<boolean> =>
       ((await browser.storage.local.get(consentKey))[consentKey] as boolean) ?? false;
+
+    /** Tell the side panel which version (if any) is currently applied to this page,
+     *  so it can highlight it in the list — including auto-applied versions on load. */
+    function notifyApplied(): void {
+      void browser.runtime
+        .sendMessage({ type: 'yandz:applied', urlKey: data?.page.urlKey ?? null, versionId: current?.id ?? null })
+        .catch(() => {});
+    }
 
     /** Apply a version's patches (DOM mutations + visual overlay), replacing any current one. */
     function applyVersion(version: VersionSummary | null): void {
@@ -91,6 +101,7 @@ export default defineContentScript({
         engine.apply(version.patches);
         overlay.render(version.patches); // drawings + annotations
       }
+      notifyApplied();
     }
 
     // IMPORTANT: register the message listener and the MutationObserver
@@ -113,9 +124,6 @@ export default defineContentScript({
       observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
     }
     ctx.onInvalidated(() => observer.disconnect());
-
-    // Holds the fetched versions once loaded (null until then / on failure).
-    let data: PageVersions | null = null;
 
     // Messages from the side panel: switch version, revert, grant consent, pick, draw.
     browser.runtime.onMessage.addListener((msg: any) => {
@@ -153,6 +161,9 @@ export default defineContentScript({
           // Clicking a change in the editor flashes its element on the page.
           flashHighlight(msg.target);
           break;
+        case 'yandz:get-applied':
+          // The panel asks which version is currently applied (to highlight it).
+          return Promise.resolve(current?.id ?? null);
         case 'yandz:start-picker':
           activeStop?.(); // stop any active drawing first
           activeStop = null;

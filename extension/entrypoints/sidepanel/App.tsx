@@ -83,6 +83,21 @@ export function App(): React.JSX.Element {
     }
   }, []);
 
+  /** Ask the active tab's content script which version is currently applied. */
+  const queryApplied = useCallback(async (): Promise<string | null> => {
+    const { id } = await getActiveTab();
+    if (id === undefined) return null;
+    try {
+      return (await browser.tabs.sendMessage(id, { type: 'yandz:get-applied' })) as string | null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Kept in a ref so the (mount-once) applied-version listener sees the live value.
+  const currentPageKeyRef = useRef<string | null>(null);
+  currentPageKeyRef.current = currentPageKey;
+
   useEffect(() => {
     void getToken()
       .then((t) => setAuthed(!!t))
@@ -94,10 +109,7 @@ export function App(): React.JSX.Element {
 
   const refresh = useCallback(async () => {
     const active = await getActiveTab();
-    if (active.url !== lastUrlRef.current) {
-      lastUrlRef.current = active.url;
-      setSelectedId(null);
-    }
+    lastUrlRef.current = active.url;
     setUrl(active.url);
     // "This page" only applies to real web pages; otherwise force global.
     const effScope: FeedScope = scope === 'page' && isWebUrl(active.url) ? 'page' : 'all';
@@ -121,7 +133,22 @@ export function App(): React.JSX.Element {
         /* opaque origin */
       }
     }
-  }, [tab, scope]);
+    // Reflect whatever the content script currently has applied on the page
+    // (auto-applied default, a shared-link version, or a prior selection).
+    setSelectedId(await queryApplied());
+  }, [tab, scope, queryApplied]);
+
+  // Reflect late auto-applies: the content script broadcasts the applied version
+  // when a page loads, which may arrive after our initial query.
+  useEffect(() => {
+    const listener = (msg: { type?: string; urlKey?: string | null; versionId?: string | null }) => {
+      if (msg?.type === 'yandz:applied' && (!msg.urlKey || msg.urlKey === currentPageKeyRef.current)) {
+        setSelectedId(msg.versionId ?? null);
+      }
+    };
+    browser.runtime.onMessage.addListener(listener as never);
+    return () => browser.runtime.onMessage.removeListener(listener as never);
+  }, []);
 
   useEffect(() => {
     if (authed) void refresh();
