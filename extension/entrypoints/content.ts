@@ -204,8 +204,9 @@ export default defineContentScript({
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
-        // Don't fight the user's in-place typing by re-applying patches over it.
-        if (current && !isInlineEditing()) engine.apply(currentPatches);
+        // Re-assert whatever is currently applied (an active version OR an editor
+        // preview). Don't fight the user's in-place typing by re-applying over it.
+        if (currentPatches.length && !isInlineEditing()) engine.apply(currentPatches);
       });
     });
     if (document.documentElement) {

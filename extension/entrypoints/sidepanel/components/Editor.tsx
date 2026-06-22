@@ -113,7 +113,13 @@ export function Editor({
 
   const addPatch = (p: Omit<AnyPatch, 'order'>) => {
     dirtyRef.current = true;
-    setPatches((prev) => [...prev, { ...p, order: prev.length } as AnyPatch]);
+    const next = [...patchesRef.current, { ...p, order: patchesRef.current.length } as AnyPatch];
+    patchesRef.current = next;
+    setPatches(next);
+    // Preview on the page immediately (same path removePatch uses). Without this,
+    // panel-driven changes (image swap, CSS, attribute) were only ever applied when
+    // the saved version was later activated — so a swap appeared to do nothing.
+    void messageTab({ type: 'yandz:apply-patches', patches: next });
   };
 
   /** Remove a single change: drop it, re-apply the remaining patches to the live
