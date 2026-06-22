@@ -59,6 +59,64 @@ import { startDrawing } from '../lib/ui/draw-capture.js';
 import { startInlineEdit, isInlineEditing } from '../lib/ui/inline-edit.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../lib/config.js';
 
+/**
+ * Resolve an imageSwap asset URL into something the PAGE can actually load.
+ *
+ * In dev, swapped images live on a loopback/private host (local MinIO); the page
+ * origin can't fetch those (Private Network Access), and an http asset on an https
+ * page is mixed content. Both are blocked. We proxy such URLs through the background
+ * (extension context, which CAN reach loopback) and inline the bytes as a `data:`
+ * URL, which bypasses PNA and mixed-content entirely. Public https CDN URLs (prod)
+ * are loaded directly. Results are cached per URL so DOM-churn re-applies are cheap.
+ */
+const assetCache = new Map<string, string>();
+
+function needsAssetProxy(url: string): boolean {
+  try {
+    const u = new URL(url, location.href);
+    if (u.protocol === 'data:' || u.protocol === 'blob:') return false;
+    const h = u.hostname;
+    const isLocal =
+      h === 'localhost' ||
+      h === '127.0.0.1' ||
+      h === '::1' ||
+      h.endsWith('.localhost') ||
+      h.endsWith('.local') ||
+      /^10\./.test(h) ||
+      /^192\.168\./.test(h) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(h);
+    // http subresource on an https page is mixed content (blocked).
+    const mixed = location.protocol === 'https:' && u.protocol === 'http:';
+    return isLocal || mixed;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveAssetUrl(url: string): Promise<string> {
+  if (!needsAssetProxy(url)) return url;
+  const cached = assetCache.get(url);
+  if (cached) return cached;
+  const dataUrl = (await browser.runtime
+    .sendMessage({ type: 'yandz:fetch-asset', url })
+    .catch(() => null)) as string | null;
+  if (dataUrl) assetCache.set(url, dataUrl);
+  return dataUrl ?? url;
+}
+
+/** Rewrite imageSwap patches whose asset the page can't load to inline data: URLs. */
+async function resolvePatches(patches: AnyPatch[]): Promise<AnyPatch[]> {
+  return Promise.all(
+    patches.map(async (p) => {
+      if (p.op === 'imageSwap') {
+        const resolved = await resolveAssetUrl(p.payload.newAssetUrl);
+        if (resolved !== p.payload.newAssetUrl) return { ...p, payload: { ...p.payload, newAssetUrl: resolved } };
+      }
+      return p;
+    }),
+  );
+}
+
 /** Capture the editable state of a picked element so the panel can prefill an editor. */
 function elementSnapshot(el: Element): Record<string, unknown> {
   const attrs: Record<string, string> = {};
@@ -78,6 +136,9 @@ export default defineContentScript({
     const engine = new PatchEngine();
     const overlay = new OverlayRenderer();
     let current: VersionSummary | null = null;
+    // The resolved patches actually applied to the DOM (image URLs inlined as
+    // data: where needed). The MutationObserver re-applies THIS, not the raw set.
+    let currentPatches: AnyPatch[] = [];
     // Holds the fetched versions once loaded (null until then / on failure).
     let data: PageVersions | null = null;
     // Stops the active page-side tool (drawing), so it can be torn down when the
@@ -104,24 +165,29 @@ export default defineContentScript({
     /** Live-apply an arbitrary patch set (editor preview): revert what's applied and
      *  apply the given patches. Used when a change is deleted/edited so the page
      *  reflects the current change list. Keeps the applied version's identity. */
-    function applyPatches(patches: AnyPatch[]): void {
+    async function applyPatches(patches: AnyPatch[]): Promise<void> {
       engine.revertAll();
       overlay.clear();
-      if (patches.length) {
-        engine.apply(patches);
-        overlay.render(patches);
+      const resolved = await resolvePatches(patches);
+      currentPatches = resolved;
+      if (resolved.length) {
+        engine.apply(resolved);
+        overlay.render(resolved);
       }
       if (current) current = { ...current, patches: patches as VersionSummary['patches'] };
     }
 
     /** Apply a version's patches (DOM mutations + visual overlay), replacing any current one. */
-    function applyVersion(version: VersionSummary | null): void {
+    async function applyVersion(version: VersionSummary | null): Promise<void> {
       engine.revertAll();
       overlay.clear();
       current = version;
+      currentPatches = [];
       if (version) {
-        engine.apply(version.patches);
-        overlay.render(version.patches); // drawings + annotations
+        const resolved = await resolvePatches(version.patches);
+        currentPatches = resolved;
+        engine.apply(resolved);
+        overlay.render(resolved); // drawings + annotations
       }
       notifyApplied();
     }
@@ -139,7 +205,7 @@ export default defineContentScript({
       raf = requestAnimationFrame(() => {
         raf = 0;
         // Don't fight the user's in-place typing by re-applying patches over it.
-        if (current && !isInlineEditing()) engine.apply(current.patches);
+        if (current && !isInlineEditing()) engine.apply(currentPatches);
       });
     });
     if (document.documentElement) {
@@ -153,7 +219,7 @@ export default defineContentScript({
         case 'yandz:apply-version': {
           const found = data?.versions.find((v) => v.id === msg.versionId);
           if (found) {
-            applyVersion(found);
+            void applyVersion(found);
           } else {
             // A just-created version won't be in our cached list — re-fetch, then apply.
             void getVersions(location.href)
@@ -161,18 +227,18 @@ export default defineContentScript({
                 if (!fresh) return;
                 data = fresh;
                 const v = fresh.versions.find((x) => x.id === msg.versionId);
-                if (v) applyVersion(v);
+                if (v) void applyVersion(v);
               })
               .catch(() => {});
           }
           break;
         }
         case 'yandz:revert':
-          applyVersion(null);
+          void applyVersion(null);
           break;
         case 'yandz:grant-consent':
           void browser.storage.local.set({ [consentKey]: true });
-          if (data?.versions[0]) applyVersion(data.versions[0]);
+          if (data?.versions[0]) void applyVersion(data.versions[0]);
           break;
         case 'yandz:stop-tools':
           // Editor closed (or switched away) — tear down any active drawing layer.
@@ -185,7 +251,7 @@ export default defineContentScript({
           break;
         case 'yandz:apply-patches':
           // Editor preview (e.g. after deleting a change) — re-apply the new set.
-          applyPatches(msg.patches as AnyPatch[]);
+          void applyPatches(msg.patches as AnyPatch[]);
           break;
         case 'yandz:get-applied':
           // The panel asks which version is currently applied (to highlight it).
@@ -264,11 +330,11 @@ export default defineContentScript({
     if (pendingId) {
       await browser.storage.local.remove(pendingKey);
       const requested = data.versions.find((v) => v.id === pendingId);
-      if (requested) applyVersion(requested);
-      else if (await hasConsent()) applyVersion(data.versions[0]!);
+      if (requested) void applyVersion(requested);
+      else if (await hasConsent()) void applyVersion(data.versions[0]!);
     } else if (await hasConsent()) {
       // Otherwise auto-apply the top version only after one-time per-site consent.
-      applyVersion(data.versions[0]!);
+      void applyVersion(data.versions[0]!);
     }
   },
 });

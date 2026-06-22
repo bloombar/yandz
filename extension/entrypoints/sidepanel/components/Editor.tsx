@@ -252,14 +252,22 @@ export function Editor({
   /** Upload an image file and add an imageSwap patch referencing its public URL. */
   const swapImage = async (file: File) => {
     if (!picked) return;
-    const ext = file.name.split('.').pop() ?? 'png';
-    const { uploadUrl, publicUrl } = await Api.presignUpload(file.type, ext);
-    await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-    addPatch({
-      op: 'imageSwap',
-      target: picked.target,
-      payload: { originalSrcHash: picked.snapshot.src ?? '', newAssetUrl: publicUrl },
-    });
+    setHint(null);
+    try {
+      const ext = file.name.split('.').pop() ?? 'png';
+      const { uploadUrl, publicUrl } = await Api.presignUpload(file.type, ext);
+      const res = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+      // Don't record an imageSwap pointing at a key the upload never wrote — that's
+      // the classic "image silently doesn't appear" failure. Surface it instead.
+      if (!res.ok) throw new Error(`upload failed (${res.status})`);
+      addPatch({
+        op: 'imageSwap',
+        target: picked.target,
+        payload: { originalSrcHash: picked.snapshot.src ?? '', newAssetUrl: publicUrl },
+      });
+    } catch (err) {
+      setHint(`Image upload failed: ${(err as Error).message}`);
+    }
   };
 
   return (
@@ -344,77 +352,99 @@ function PickedEditor({
   const [attrVal, setAttrVal] = useState('');
 
   return (
-    <div className="card">
-      <div className="muted">Editing &lt;{picked.snapshot.tagName}&gt;</div>
+    <div className="card picked-editor">
+      <div className="picked-title">
+        Editing <code>&lt;{picked.snapshot.tagName}&gt;</code>
+      </div>
 
       {/* Text */}
-      <label>Text</label>
-      <input value={text} onChange={(e) => setText(e.target.value)} />
-      <button
-        className="btn"
-        onClick={() => onAdd({ op: 'textReplace', target: picked.target, payload: { from: picked.snapshot.text, to: text } })}
-      >
-        Replace text
-      </button>
-
-      {/* Image (only for <img>) */}
-      {picked.snapshot.tagName === 'img' && (
-        <>
-          <label>Replace image</label>
-          <input type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && onSwapImage(e.target.files[0])} />
-        </>
-      )}
-
-      {/* CSS override */}
-      <label>CSS override</label>
-      <div className="row" style={{ gap: 4 }}>
-        <input style={{ flex: 1 }} value={cssProp} onChange={(e) => setCssProp(e.target.value)} placeholder="property" />
-        <input style={{ flex: 1 }} value={cssVal} onChange={(e) => setCssVal(e.target.value)} placeholder="value" />
-      </div>
-      <button
-        className="btn"
-        onClick={() => onAdd({ op: 'cssOverride', target: picked.target, payload: { declarations: { [cssProp]: cssVal } } })}
-      >
-        Add CSS
-      </button>
-
-      {/* Attribute change */}
-      <label>Attribute</label>
-      <div className="row" style={{ gap: 4 }}>
-        <input style={{ flex: 1 }} value={attr} onChange={(e) => setAttr(e.target.value)} placeholder="attr" />
-        <input style={{ flex: 1 }} value={attrVal} onChange={(e) => setAttrVal(e.target.value)} placeholder="value" />
-      </div>
-      <button
-        className="btn"
-        onClick={() =>
-          onAdd({
-            op: 'attrChange',
-            target: picked.target,
-            // Capture the element's current value of this attribute for the diff.
-            payload: { attr, value: attrVal, from: picked.snapshot.attrs[attr] },
-          })
-        }
-      >
-        Set attribute
-      </button>
-
-      {/* Annotations */}
-      <label>Annotate</label>
-      <div className="row" style={{ gap: 4 }}>
-        <button
-          className="btn"
-          onClick={() => onAdd({ op: 'annotation', target: picked.target, payload: { kind: 'highlight', color: '#ff0' } })}
-        >
-          Highlight
-        </button>
+      <div className="field">
+        <label>Text</label>
+        <input value={text} onChange={(e) => setText(e.target.value)} />
         <button
           className="btn"
           onClick={() =>
-            onAdd({ op: 'annotation', target: picked.target, payload: { kind: 'note', color: '#ff0', body: text } })
+            onAdd({ op: 'textReplace', target: picked.target, payload: { from: picked.snapshot.text, to: text } })
           }
         >
-          Add note
+          Replace text
         </button>
+      </div>
+
+      {/* Image (only for <img>) */}
+      {picked.snapshot.tagName === 'img' && (
+        <div className="field">
+          <label>Replace image</label>
+          <input
+            className="file-input"
+            type="file"
+            accept="image/*"
+            onChange={(e) => e.target.files?.[0] && onSwapImage(e.target.files[0])}
+          />
+          <p className="field-hint muted">Pick an image to swap in for this one.</p>
+        </div>
+      )}
+
+      {/* CSS override */}
+      <div className="field">
+        <label>CSS override</label>
+        <div className="field-row">
+          <input value={cssProp} onChange={(e) => setCssProp(e.target.value)} placeholder="property" />
+          <input value={cssVal} onChange={(e) => setCssVal(e.target.value)} placeholder="value" />
+        </div>
+        <button
+          className="btn"
+          onClick={() =>
+            onAdd({ op: 'cssOverride', target: picked.target, payload: { declarations: { [cssProp]: cssVal } } })
+          }
+        >
+          Add CSS
+        </button>
+      </div>
+
+      {/* Attribute change */}
+      <div className="field">
+        <label>Attribute</label>
+        <div className="field-row">
+          <input value={attr} onChange={(e) => setAttr(e.target.value)} placeholder="attr" />
+          <input value={attrVal} onChange={(e) => setAttrVal(e.target.value)} placeholder="value" />
+        </div>
+        <button
+          className="btn"
+          onClick={() =>
+            onAdd({
+              op: 'attrChange',
+              target: picked.target,
+              // Capture the element's current value of this attribute for the diff.
+              payload: { attr, value: attrVal, from: picked.snapshot.attrs[attr] },
+            })
+          }
+        >
+          Set attribute
+        </button>
+      </div>
+
+      {/* Annotations */}
+      <div className="field">
+        <label>Annotate</label>
+        <div className="field-row">
+          <button
+            className="btn"
+            onClick={() =>
+              onAdd({ op: 'annotation', target: picked.target, payload: { kind: 'highlight', color: '#ff0' } })
+            }
+          >
+            Highlight
+          </button>
+          <button
+            className="btn"
+            onClick={() =>
+              onAdd({ op: 'annotation', target: picked.target, payload: { kind: 'note', color: '#ff0', body: text } })
+            }
+          >
+            Add note
+          </button>
+        </div>
       </div>
     </div>
   );

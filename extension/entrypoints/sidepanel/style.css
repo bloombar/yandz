@@ -29,6 +29,19 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 /* Stray status/empty messages dropped directly into a list get the same inset. */
 .list > .muted, .list > .error { padding: 12px; }
 .card { border: 1px solid #8883; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+/* Picked-element editor: stacked, evenly spaced field groups with aligned inputs. */
+.picked-editor { display: flex; flex-direction: column; gap: 14px; }
+.picked-title { font-weight: 600; }
+.picked-title code { font-family: ui-monospace, monospace; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field > label { font-size: 12px; font-weight: 600; color: #8889; }
+.field input { width: 100%; padding: 6px 8px; border: 1px solid #8884; border-radius: 6px; font: inherit; background: transparent; color: inherit; }
+.field .file-input { padding: 5px 0; border: none; }
+.field-row { display: flex; gap: 8px; }
+.field-row > input { flex: 1; min-width: 0; }
+.field > .btn, .field-row > .btn { align-self: flex-start; }
+.field-row > .btn { align-self: auto; }
+.field-hint { margin: 0; font-size: 11px; }
 .card .row { display: flex; align-items: center; gap: 8px; }
 .handle { color: #4c9ffe; cursor: pointer; }
 .muted { color: #8889; }

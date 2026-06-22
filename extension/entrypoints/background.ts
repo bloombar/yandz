@@ -19,6 +19,25 @@ interface PushData {
   url?: string;
 }
 
+/**
+ * Fetch a (possibly loopback/http) asset and return it as a base64 `data:` URL.
+ * Runs in the service worker, which can reach loopback and isn't subject to the
+ * page's mixed-content rules. `FileReader` isn't available in SWs, so we encode
+ * via `btoa` over the bytes (chunked to avoid call-stack limits on large images).
+ */
+async function fetchAsDataUrl(url: string): Promise<string | null> {
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
+  return `data:${contentType};base64,${btoa(binary)}`;
+}
+
 export default defineBackground(() => {
   // On install/startup, make the action click open the panel (Chromium).
   configurePanelBehavior();
@@ -43,6 +62,11 @@ export default defineBackground(() => {
       // a loopback backend (localhost). The background runs in the extension context
       // and can. Returning a Promise responds to the sender.
       return Api.getVersionsForUrl(m.url, 'foryou', m.title).catch(() => null);
+    } else if (m?.type === 'yandz:fetch-asset' && m.url) {
+      // Proxy a swapped-image fetch for the SAME reason: the page can't load an asset
+      // hosted on loopback (PNA) or an http asset on an https page (mixed content).
+      // The background fetches it and returns a data: URL the page can render inline.
+      return fetchAsDataUrl(m.url).catch(() => null);
     }
     return undefined;
   });
