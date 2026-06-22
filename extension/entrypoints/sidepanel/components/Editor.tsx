@@ -117,10 +117,13 @@ export function Editor({
     setPatches((prev) => [...prev, { ...p, order: prev.length } as AnyPatch]);
   };
 
-  /** Remove a single change; the debounced auto-save then persists the rest. */
+  /** Remove a single change: drop it, re-apply the remaining patches to the live
+   *  page so the deleted change disappears, and let auto-save persist the rest. */
   const removePatch = (index: number) => {
+    const next = patches.filter((_, i) => i !== index);
     dirtyRef.current = true;
-    setPatches((prev) => prev.filter((_, i) => i !== index));
+    setPatches(next);
+    void messageTab({ type: 'yandz:apply-patches', patches: next });
   };
 
   // Preload the patches we're building on: the user's own version (to keep adding

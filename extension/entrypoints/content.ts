@@ -34,7 +34,7 @@ async function getVersions(url: string): Promise<PageVersions | null> {
 import { PatchEngine } from '../lib/engine/applier.js';
 import { fingerprintElement } from '../lib/engine/fingerprint.js';
 import { matchTarget } from '../lib/engine/matcher.js';
-import type { ElementTarget } from '@yandz/shared';
+import type { AnyPatch, ElementTarget } from '@yandz/shared';
 
 /** Briefly highlight (and scroll to) an element matched from a patch target. */
 function flashHighlight(target: ElementTarget): void {
@@ -99,6 +99,19 @@ export default defineContentScript({
       void browser.runtime
         .sendMessage({ type: 'yandz:applied', urlKey: urlKey ?? null, versionId: current?.id ?? null })
         .catch(() => {});
+    }
+
+    /** Live-apply an arbitrary patch set (editor preview): revert what's applied and
+     *  apply the given patches. Used when a change is deleted/edited so the page
+     *  reflects the current change list. Keeps the applied version's identity. */
+    function applyPatches(patches: AnyPatch[]): void {
+      engine.revertAll();
+      overlay.clear();
+      if (patches.length) {
+        engine.apply(patches);
+        overlay.render(patches);
+      }
+      if (current) current = { ...current, patches: patches as VersionSummary['patches'] };
     }
 
     /** Apply a version's patches (DOM mutations + visual overlay), replacing any current one. */
@@ -169,6 +182,10 @@ export default defineContentScript({
         case 'yandz:highlight-element':
           // Clicking a change in the editor flashes its element on the page.
           flashHighlight(msg.target);
+          break;
+        case 'yandz:apply-patches':
+          // Editor preview (e.g. after deleting a change) — re-apply the new set.
+          applyPatches(msg.patches as AnyPatch[]);
           break;
         case 'yandz:get-applied':
           // The panel asks which version is currently applied (to highlight it).
