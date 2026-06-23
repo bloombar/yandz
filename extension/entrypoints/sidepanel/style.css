@@ -20,6 +20,9 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .pill.active { background: #4c9ffe; color: #fff; border-color: transparent; }
 .revert-link { color: #4c9ffe; cursor: pointer; font-size: 12px; }
 .revert-link:hover { text-decoration: underline; }
+/* Live search above the feed list. */
+.search-bar { padding: 8px 12px 0; }
+.search-input { width: 100%; padding: 6px 8px; border: 1px solid #8884; border-radius: 6px; font: inherit; background: transparent; color: inherit; }
 /* Scroll container: no padding itself. Full-bleed rows (VersionRow) carry their
    own 12px inset; other panel content is wrapped in .panel-body for the same inset. */
 .list { flex: 1; overflow: auto; }

@@ -71,6 +71,10 @@ export function App(): React.JSX.Element {
   const [listError, setListError] = useState<string | null>(null);
   const [shareNote, setShareNote] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // Live feed search: `searchInput` is the raw field value; `search` is the debounced
+  // value actually queried (so each keystroke doesn't fire a request).
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
 
   // Navigation stack — closing a panel pops back to the previous view.
   const [stack, setStack] = useState<View[]>([{ name: 'feed' }]);
@@ -125,10 +129,10 @@ export function App(): React.JSX.Element {
     try {
       const result =
         tab === 'bookmarks'
-          ? await Api.getBookmarksFeed(effScope, active.url)
+          ? await Api.getBookmarksFeed(effScope, active.url, search)
           : tab === 'byyou'
-            ? await Api.getMyFeed(effScope, active.url)
-            : await Api.getFeed(tab as FeedSort, effScope, active.url);
+            ? await Api.getMyFeed(effScope, active.url, search)
+            : await Api.getFeed(tab as FeedSort, effScope, active.url, search);
       setItems(result.versions);
       setCurrentPageKey(result.currentPageKey);
       pageKeyNow = result.currentPageKey;
@@ -156,7 +160,7 @@ export function App(): React.JSX.Element {
     } else {
       setSelectedId(await queryApplied());
     }
-  }, [tab, scope, queryApplied]);
+  }, [tab, scope, search, queryApplied]);
 
   // Reflect late auto-applies: the content script broadcasts the applied version
   // when a page loads, which may arrive after our initial query.
@@ -169,6 +173,12 @@ export function App(): React.JSX.Element {
     browser.runtime.onMessage.addListener(listener as never);
     return () => browser.runtime.onMessage.removeListener(listener as never);
   }, []);
+
+  // Debounce the search field → committed `search` (which `refresh` depends on).
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   useEffect(() => {
     if (authed) void refresh();
@@ -373,6 +383,18 @@ export function App(): React.JSX.Element {
 
           {shareNote && <div className="muted" style={{ margin: '6px 12px 0' }}>{shareNote}</div>}
 
+          {/* Live search over the list: version title, page title, or u/username. */}
+          <div className="search-bar">
+            <input
+              className="search-input"
+              type="search"
+              placeholder="Search versions, pages, or u/username"
+              aria-label="Search the list"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+            />
+          </div>
+
           <div className="list">
             {items.map((v) => (
               <VersionRow
@@ -394,6 +416,8 @@ export function App(): React.JSX.Element {
             {items.length === 0 &&
               (listError ? (
                 <p className="error">Couldn’t load the feed: {listError}</p>
+              ) : search ? (
+                <p className="muted">No matches for “{search}”.</p>
               ) : (
                 <p className="muted">
                   {tab === 'bookmarks'

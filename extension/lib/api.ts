@@ -145,16 +145,17 @@ export const Api = {
         (title ? `&title=${encodeURIComponent(title)}` : ''),
     ),
 
-  // Global (or this-page) feed. `url` is the active tab's URL for scope/comparison.
-  getFeed: (sort: FeedSort, scope: FeedScope, url?: string) =>
-    api<FeedResult>(`/feed?sort=${sort}&scope=${scope}&url=${encodeURIComponent(url ?? '')}`),
+  // Global (or this-page) feed. `url` is the active tab's URL for scope/comparison;
+  // `q` is an optional free-text search (version title, page title, or u/handle).
+  getFeed: (sort: FeedSort, scope: FeedScope, url?: string, q?: string) =>
+    api<FeedResult>(`/feed?sort=${sort}&scope=${scope}&url=${encodeURIComponent(url ?? '')}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
 
-  getBookmarksFeed: (scope: FeedScope, url?: string) =>
-    api<FeedResult>(`/feed/bookmarks?scope=${scope}&url=${encodeURIComponent(url ?? '')}`),
+  getBookmarksFeed: (scope: FeedScope, url?: string, q?: string) =>
+    api<FeedResult>(`/feed/bookmarks?scope=${scope}&url=${encodeURIComponent(url ?? '')}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
 
   // The viewer's own versions (newest first) — the "By you" tab.
-  getMyFeed: (scope: FeedScope, url?: string) =>
-    api<FeedResult>(`/feed?mine=1&scope=${scope}&url=${encodeURIComponent(url ?? '')}`),
+  getMyFeed: (scope: FeedScope, url?: string, q?: string) =>
+    api<FeedResult>(`/feed?mine=1&scope=${scope}&url=${encodeURIComponent(url ?? '')}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
 
   toggleBookmark: (id: string, on: boolean) =>
     api<{ bookmarked: boolean }>(`/versions/${id}/bookmark`, { method: on ? 'POST' : 'DELETE' }),

@@ -8,7 +8,7 @@
  */
 import { Router, type Request, type Response } from 'express';
 import { Types } from 'mongoose';
-import { Page, Version, Bookmark } from '../models.js';
+import { Page, Version, Bookmark, User } from '../models.js';
 import { requireAuth } from '../lib/auth.js';
 import { pageKey } from '../services/url.js';
 import { loadViewerSocial } from '../services/social.js';
@@ -18,6 +18,30 @@ import { sortVersions, type SortMode } from '@yandz/shared';
 export const feedRouter = Router();
 
 const FEED_LIMIT = 50;
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Build the `$or` clauses for a free-text feed search: matches a version's name, the
+ * title of the page it modifies, or its author's handle. A leading `u/` is treated as
+ * a username hint and stripped (so "u/alice" and "alice" both match the handle).
+ * Returns [] when the query is empty (no filtering).
+ */
+async function searchClauses(rawQ: string): Promise<Record<string, unknown>[]> {
+  const q = rawQ.trim().replace(/^u\//i, '').trim();
+  if (!q) return [];
+  const rx = new RegExp(escapeRegex(q), 'i');
+  const [pages, users] = await Promise.all([
+    Page.find({ title: rx }).select('_id').lean(),
+    User.find({ handle: rx }).select('_id').lean(),
+  ]);
+  const clauses: Record<string, unknown>[] = [{ name: rx }];
+  if (pages.length) clauses.push({ pageId: { $in: pages.map((p) => p._id) } });
+  if (users.length) clauses.push({ authorId: { $in: users.map((u) => u._id) } });
+  return clauses;
+}
 
 /** Resolve the optional page filter: returns the pageId for scope=page, or null. */
 async function resolveScope(
@@ -38,6 +62,7 @@ feedRouter.get('/', async (req: Request, res: Response) => {
   const rawUrl = String(req.query.url ?? '');
   const mine = String(req.query.mine ?? '') === '1';
   const { currentPageKey, pageId } = await resolveScope(scope, rawUrl);
+  const clauses = await searchClauses(String(req.query.q ?? ''));
 
   // scope=page with no matching page → empty (but still report the key).
   if (scope === 'page' && !pageId) {
@@ -53,14 +78,17 @@ feedRouter.get('/', async (req: Request, res: Response) => {
     }
     const filter: Record<string, unknown> = { authorId: new Types.ObjectId(req.userId) };
     if (pageId) filter.pageId = pageId;
+    if (clauses.length) filter.$or = clauses;
     const docs = await Version.find(filter).sort({ createdAt: -1 }).limit(FEED_LIMIT).lean();
     res.json({ currentPageKey, versions: await serializeVersions(docs as unknown as RawVersion[], req.userId) });
     return;
   }
 
+  const versionFilter: Record<string, unknown> = pageId ? { pageId } : {};
+  if (clauses.length) versionFilter.$or = clauses;
   const [social, raw] = await Promise.all([
     loadViewerSocial(req.userId ?? null),
-    Version.find(pageId ? { pageId } : {})
+    Version.find(versionFilter)
       .sort({ createdAt: -1 })
       .limit(500) // headroom before block-filter + rank + final slice
       .lean(),
@@ -93,6 +121,7 @@ feedRouter.get('/bookmarks', requireAuth, async (req: Request, res: Response) =>
     res.json({ currentPageKey, versions: [] });
     return;
   }
+  const clauses = await searchClauses(String(req.query.q ?? ''));
 
   const [social, marks] = await Promise.all([
     loadViewerSocial(req.userId!),
@@ -102,6 +131,7 @@ feedRouter.get('/bookmarks', requireAuth, async (req: Request, res: Response) =>
 
   const filter: Record<string, unknown> = { _id: { $in: versionIds } };
   if (pageId) filter.pageId = pageId;
+  if (clauses.length) filter.$or = clauses;
   const docs = await Version.find(filter).lean();
 
   // Preserve bookmark recency order, then drop blocked authors.
