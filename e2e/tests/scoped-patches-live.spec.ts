@@ -90,6 +90,10 @@ test('per-change scope applies site/global patches across pages for the author o
   try {
     const sw = await getSW(ctx);
     await setToken(sw, tokenA);
+    // Grant the global "modify web pages" consent so personal patches auto-apply.
+    await sw.evaluate(async () => {
+      await (globalThis as any).chrome.storage.local.set({ 'yandz:consent': 'granted' });
+    });
     const page = await ctx.newPage();
 
     // Same host, different page → BOTH site + global auto-apply (no consent).

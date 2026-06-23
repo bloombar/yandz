@@ -5,9 +5,9 @@
  *  1. Fetches the ranked versions for the current URL.
  *  2. If versions exist, mounts a discrete floating icon (in a Shadow DOM so page
  *     CSS can't break it and it isn't itself a patch target).
- *  3. Applies the top-ranked version automatically AFTER a one-time per-origin
- *     consent (the apply model the user chose). Until consent, it only offers a
- *     prompt — it never silently mutates a page on first visit.
+ *  3. Applies the top-ranked version automatically — but ONLY after the user grants a
+ *     one-time GLOBAL consent (the first-run modal). Without consent it applies no
+ *     patches on any page.
  *  4. Keeps patches applied across SPA/async DOM changes via a debounced
  *     MutationObserver.
  *  5. Hosts the element picker used by the editor (driven by panel messages).
@@ -63,6 +63,7 @@ function flashHighlight(target: ElementTarget): void {
   setTimeout(() => box.remove(), 1600);
 }
 import { mountFloatingIcon } from '../lib/ui/floating-icon.js';
+import { CONSENT_KEY, getConsent, setConsent, showConsentModal, dismissConsentModal } from '../lib/ui/consent-modal.js';
 import { startPicker, hasOwnText } from '../lib/ui/picker.js';
 import { OverlayRenderer } from '../lib/ui/overlay-renderer.js';
 import { startDrawing } from '../lib/ui/draw-capture.js';
@@ -167,10 +168,10 @@ export default defineContentScript({
     // editor closes or another tool starts.
     let activeStop: (() => void) | null = null;
 
-    // Per-origin consent key for the auto-apply gate.
-    const consentKey = `consent:${location.origin}`;
-    const hasConsent = async (): Promise<boolean> =>
-      ((await browser.storage.local.get(consentKey))[consentKey] as boolean) ?? false;
+    // GLOBAL consent gate: Y and Z applies NO patches on ANY page until the user has
+    // granted consent (once, via the first-run modal). Mirrors storage so cross-tab /
+    // settings changes take effect live.
+    let consented = false;
 
     /** Record which version (if any) is currently applied to this page so the side
      *  panel can highlight it — including versions auto-applied on load, before the
@@ -188,6 +189,7 @@ export default defineContentScript({
      *  apply the given patches. Used when a change is deleted/edited so the page
      *  reflects the current change list. Keeps the applied version's identity. */
     async function applyPatches(patches: AnyPatch[]): Promise<void> {
+      if (!consented) return; // no patching without consent
       // Resolve assets BEFORE mutating the live state. Otherwise the async resolve
       // leaves a window where currentPatches points at the new (loopback) image URL
       // but currentAssets is empty, so a MutationObserver re-apply during that gap
@@ -207,6 +209,7 @@ export default defineContentScript({
 
     /** Apply a version's patches (DOM mutations + visual overlay), replacing any current one. */
     async function applyVersion(version: VersionSummary | null): Promise<void> {
+      if (!consented) return; // no patching without consent
       // Resolve assets first (see applyPatches) so there's no gap where the page
       // shows the original/broken image between revert and re-apply. The personal
       // site/global layer is always applied alongside (or alone, if no version).
@@ -291,10 +294,6 @@ export default defineContentScript({
             void applyVersion(current);
           });
           break;
-        case 'yandz:grant-consent':
-          void browser.storage.local.set({ [consentKey]: true });
-          if (data?.versions[0]) void applyVersion(data.versions[0]);
-          break;
         case 'yandz:stop-tools':
           // Editor closed (or switched away) — tear down any active drawing layer.
           activeStop?.();
@@ -360,54 +359,68 @@ export default defineContentScript({
       }
     });
 
-    // Fetch existing versions (best-effort; a failure or empty result just means
-    // no floating icon / nothing to auto-apply — editing still works via the panel).
+    /** Apply this page's versions + personal layer. No-op without consent (the apply
+     *  functions also hard-gate on `consented`); uses the already-fetched `data`. */
+    async function applyForPage(): Promise<void> {
+      if (!consented) return;
+      if (!data || data.versions.length === 0) {
+        if (personalPatches.length) void applyVersion(null);
+        return;
+      }
+      // A shared link (`#yandz-v=<id>`) or a "pending apply" flag applies that exact
+      // version; otherwise auto-apply the top-ranked one.
+      const hashMatch = location.hash.match(/yandz-v=([a-f0-9]+)/i);
+      const pendingKey = `pendingApply:${data.page.urlKey}`;
+      const pendingId =
+        hashMatch?.[1] ?? ((await browser.storage.local.get(pendingKey))[pendingKey] as string | undefined);
+      if (pendingId) {
+        await browser.storage.local.remove(pendingKey);
+        const requested = data.versions.find((v) => v.id === pendingId);
+        void applyVersion(requested ?? data.versions[0]!);
+      } else {
+        void applyVersion(data.versions[0]!);
+      }
+    }
+
+    // React to consent changes (the first-run modal, the Settings toggle, or another
+    // tab): granting applies this page; revoking reverts it to the original.
+    browser.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local' || !changes[CONSENT_KEY]) return;
+      const granted = changes[CONSENT_KEY].newValue === 'granted';
+      if (granted === consented) return;
+      consented = granted;
+      dismissConsentModal();
+      if (granted) void applyForPage();
+      else revertToOriginal();
+    });
+
+    // Fetch versions + the personal layer and mount the floating icon REGARDLESS of
+    // consent (these are reads, not page modifications — the icon is just the panel
+    // entry point). Done BEFORE any modal await so a consent grant (from the modal or
+    // another tab) has data ready to apply. Patches are applied only when consented.
     try {
       data = await getVersions(location.href);
     } catch {
       return; // backend unreachable
     }
-
-    // The viewer's own site/global-scoped patches auto-apply silently on every page,
-    // independent of shared versions or consent (they're the user's own choices).
     personalPatches = await getMyPatches(location.href);
-
-    if (!data || data.versions.length === 0) {
-      // No shared versions here, but the personal layer may still apply on its own.
-      if (personalPatches.length) void applyVersion(null);
-      return;
+    if (data && data.versions.length > 0) {
+      mountFloatingIcon({
+        count: data.versions.length,
+        onClick: () => browser.runtime.sendMessage({ type: 'yandz:open-panel' }),
+      });
     }
 
-    // Mount the floating icon with the version count.
-    mountFloatingIcon({
-      count: data.versions.length,
-      onClick: () => browser.runtime.sendMessage({ type: 'yandz:open-panel' }),
-    });
-
-    // A shared link (`#yandz-v=<id>`) or a "pending apply" flag (set when a profile/
-    // feed row is clicked) takes priority: apply that exact version once, regardless
-    // of consent. The hash form lets a shared link auto-apply for any recipient.
-    const hashMatch = location.hash.match(/yandz-v=([a-f0-9]+)/i);
-    const pendingKey = `pendingApply:${data.page.urlKey}`;
-    const pendingId =
-      hashMatch?.[1] ?? ((await browser.storage.local.get(pendingKey))[pendingKey] as string | undefined);
-    let appliedVersion = false;
-    if (pendingId) {
-      await browser.storage.local.remove(pendingKey);
-      const requested = data.versions.find((v) => v.id === pendingId);
-      if (requested) {
-        void applyVersion(requested);
-        appliedVersion = true;
-      } else if (await hasConsent()) {
-        void applyVersion(data.versions[0]!);
-        appliedVersion = true;
-      }
-    } else if (await hasConsent()) {
-      // Otherwise auto-apply the top version only after one-time per-site consent.
-      void applyVersion(data.versions[0]!);
-      appliedVersion = true;
+    // Determine consent. Already granted → apply now. First run (no decision yet) →
+    // prompt with the in-page modal; the storage listener applies once the user
+    // chooses (or consent is granted elsewhere). Declined → apply nothing.
+    const decision = await getConsent();
+    if (decision === 'granted') {
+      consented = true;
+      await applyForPage();
+    } else if (decision === undefined) {
+      const granted = await showConsentModal();
+      await setConsent(granted ? 'granted' : 'declined'); // storage listener applies on grant
     }
-    // If no shared version auto-applied, still apply the personal site/global layer.
-    if (!appliedVersion && personalPatches.length) void applyVersion(null);
   },
 });

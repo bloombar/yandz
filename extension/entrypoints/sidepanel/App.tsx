@@ -74,7 +74,6 @@ export function App(): React.JSX.Element {
   const [tab, setTab] = useState<TabKey>('foryou');
   const [scope, setScope] = useState<FeedScope>('all');
   const [currentPageKey, setCurrentPageKey] = useState<string | null>(null);
-  const [consented, setConsented] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [shareNote, setShareNote] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE_DEFAULT);
@@ -126,21 +125,13 @@ export function App(): React.JSX.Element {
 
   const lastUrlRef = useRef<string | undefined>(undefined);
 
-  // Page metadata for the active tab (url/title/consent). The feed LIST itself is
-  // fetched + windowed by useWindowedFeed below (reset whenever resetKey changes).
+  // Page metadata for the active tab (url/title). The feed LIST itself is fetched +
+  // windowed by useWindowedFeed below (reset whenever resetKey changes).
   const refresh = useCallback(async () => {
     const active = await getActiveTab();
     lastUrlRef.current = active.url;
     setUrl(active.url);
     setPageTitle(active.title);
-    if (isWebUrl(active.url)) {
-      try {
-        const key = `consent:${new URL(active.url!).origin}`;
-        setConsented(!!(await browser.storage.local.get(key))[key]);
-      } catch {
-        /* opaque origin */
-      }
-    }
   }, []);
 
   // One page of the active feed (tab/scope/url/search), for the windowed list.
@@ -293,27 +284,6 @@ export function App(): React.JSX.Element {
   /** "See details": open the panel defaulting to Comments if any exist, else Changes. */
   const openDetails = (v: FeedItem) => openVersionPanel(v, v.commentCount > 0 ? 'comments' : 'changes');
 
-  const grantConsent = async () => {
-    if (isWebUrl(url)) {
-      try {
-        await browser.storage.local.set({ [`consent:${new URL(url!).origin}`]: true });
-      } catch {
-        /* opaque origin */
-      }
-    }
-    // Activate the default version for this page — the top of the current feed that
-    // targets it (highest-ranked under "For you", newest under "Latest") — and mark
-    // it active, exactly as if the user had clicked that row.
-    const top = items.find((v) => v.page.urlKey === currentPageKey);
-    if (top) {
-      setSelectedId(top.id);
-      await messageTab({ type: 'yandz:apply-version', versionId: top.id });
-    } else {
-      await messageTab({ type: 'yandz:grant-consent' });
-    }
-    setConsented(true);
-  };
-
   /** Start (or continue) an editing session with a tool. */
   const startTool = (tool: 'pick' | 'draw') => {
     if (view.name === 'editor') {
@@ -404,17 +374,6 @@ export function App(): React.JSX.Element {
               ) : (
                 <span className="muted">Showing original</span>
               )}
-            </div>
-          )}
-
-          {!consented && isWebUrl(url) && items.some((v) => v.page.urlKey === currentPageKey) && (
-            <div className="banner">
-              Other users have modified this page. Apply the top version on this site?
-              <div style={{ marginTop: 6 }}>
-                <button className="btn primary" onClick={grantConsent}>
-                  Apply &amp; remember for {new URL(url!).host}
-                </button>
-              </div>
             </div>
           )}
 

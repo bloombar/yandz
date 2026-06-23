@@ -12,6 +12,7 @@ import { browser } from 'wxt/browser';
 import { Api, type PublicUser, type ScopedPatchEntry } from '../../../lib/api.js';
 import type { PatchScope } from '@yandz/shared';
 import { ITEMS_PER_PAGE_DEFAULT, ITEMS_PER_PAGE_MIN, ITEMS_PER_PAGE_MAX } from '../../../lib/config.js';
+import { getConsent, setConsent } from '../../../lib/ui/consent-modal.js';
 import { ChangeItem } from './ChangeItem.js';
 import { PanelHeader } from './PanelHeader.js';
 
@@ -42,6 +43,7 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
   const [globalPatches, setGlobalPatches] = useState<ScopedPatchEntry[]>([]);
   const [sitePatches, setSitePatches] = useState<ScopedPatchEntry[]>([]);
   const [itemsPerPage, setItemsPerPage] = useState<number>(ITEMS_PER_PAGE_DEFAULT);
+  const [patchingAllowed, setPatchingAllowed] = useState(false);
   const [siteSearch, setSiteSearch] = useState('');
   const [expandedSites, setExpandedSites] = useState<Set<string>>(new Set()); // collapsed by default
   const toggleSite = (site: string) =>
@@ -67,7 +69,14 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
     void browser.storage.local.get('itemsPerPage').then((o) => {
       if (o.itemsPerPage !== undefined) setItemsPerPage(Number(o.itemsPerPage) || ITEMS_PER_PAGE_DEFAULT);
     });
+    void getConsent().then((d) => setPatchingAllowed(d === 'granted'));
   }, [loadPeople, loadGlobal, loadSite]);
+
+  /** Toggle global consent to patch web pages (content scripts react via storage). */
+  const togglePatching = (allowed: boolean) => {
+    setPatchingAllowed(allowed);
+    void setConsent(allowed ? 'granted' : 'declined');
+  };
 
   /** Persist the items-per-page preference (App picks it up via storage.onChanged). */
   const saveItemsPerPage = (n: number) => {
@@ -221,6 +230,22 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
         )}
 
         {tab === 'prefs' && (
+          <>
+          <div className="field">
+            <label htmlFor="allow-patching">Modify web pages</label>
+            <label className="row" style={{ gap: 8, cursor: 'pointer' }}>
+              <input
+                id="allow-patching"
+                type="checkbox"
+                checked={patchingAllowed}
+                onChange={(e) => togglePatching(e.target.checked)}
+              />
+              <span>Allow Y and Z to apply modifications to the pages you visit</span>
+            </label>
+            <p className="field-hint muted">
+              When off, no page is modified anywhere until you turn this back on.
+            </p>
+          </div>
           <div className="field">
             <label htmlFor="items-per-page">Items per page</label>
             <input
@@ -236,6 +261,7 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
               How many results each feed loads per page as you scroll ({ITEMS_PER_PAGE_MIN}–{ITEMS_PER_PAGE_MAX}).
             </p>
           </div>
+          </>
         )}
       </div>
     </div>

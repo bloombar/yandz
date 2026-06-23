@@ -93,6 +93,11 @@ test('image swap shows on the real unherd page (loopback asset proxied as data: 
     ],
   });
   try {
+    // Grant the global "modify web pages" consent so the content script applies patches.
+    const sw = ctx.serviceWorkers()[0] ?? (await ctx.waitForEvent('serviceworker'));
+    await sw.evaluate(async () => {
+      await (globalThis as any).chrome.storage.local.set({ 'yandz:consent': 'granted' });
+    });
     const page = await ctx.newPage();
     await page.goto(`${ARTICLE}#yandz-v=${versionId}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
 

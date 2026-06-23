@@ -65,17 +65,22 @@ test('image swap survives editor close (preview → apply-version)', async ({}, 
     args: ['--headless=new', `--disable-extensions-except=${EXT_PATH}`, `--load-extension=${EXT_PATH}`, '--no-sandbox'],
   });
   try {
+    let sw: Worker | undefined = ctx.serviceWorkers()[0];
+    if (!sw) sw = await ctx.waitForEvent('serviceworker');
+
     const page = await ctx.newPage();
-    // No share-hash: the page loads with the ORIGINAL image (consent gate ⇒ no auto-apply).
+    // No consent yet ⇒ the consent gate keeps the page on its ORIGINAL image.
     await page.goto(ARTICLE, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     const img = page.locator(TARGET).first();
     await expect(img).toHaveCount(1, { timeout: 30_000 });
     const originalSrc = await img.getAttribute('src');
-    expect(originalSrc, 'starts on the original image').not.toMatch(/^data:image\//);
+    expect(originalSrc, 'no patches before consent').not.toMatch(/^data:image\//);
 
-    // Grab the service worker + the article tab id.
-    let sw: Worker | undefined = ctx.serviceWorkers()[0];
-    if (!sw) sw = await ctx.waitForEvent('serviceworker');
+    // Grant the global "modify web pages" consent; the content script reacts live.
+    await sw.evaluate(async () => {
+      await (globalThis as any).chrome.storage.local.set({ 'yandz:consent': 'granted' });
+    });
+
     const tabId = await sw.evaluate(async () => {
       const tabs = await (globalThis as any).chrome.tabs.query({});
       return tabs.find((t: any) => t.url?.includes('unherd.com'))?.id as number;
