@@ -47,6 +47,8 @@ export interface FeedResult {
   /** Normalized key of the active tab's page (for "this page" comparisons), or null. */
   currentPageKey: string | null;
   versions: FeedItem[];
+  /** True if more results exist after this page (for infinite scroll). */
+  hasMore: boolean;
 }
 
 export type FeedSort = 'foryou' | 'latest';
@@ -91,6 +93,15 @@ export async function getCurrentUser(): Promise<{ id: string; handle: string } |
 export async function setToken(token: string | null): Promise<void> {
   if (token) await browser.storage.session.set({ token });
   else await browser.storage.session.remove('token');
+}
+
+/** Build the optional `&q=&offset=&limit=` suffix shared by the feed endpoints. */
+function pageQuery(q?: string, offset?: number, limit?: number): string {
+  let s = '';
+  if (q) s += `&q=${encodeURIComponent(q)}`;
+  if (offset !== undefined) s += `&offset=${offset}`;
+  if (limit !== undefined) s += `&limit=${limit}`;
+  return s;
 }
 
 /** Low-level fetch wrapper that injects auth + JSON handling and throws on !ok. */
@@ -146,16 +157,16 @@ export const Api = {
     ),
 
   // Global (or this-page) feed. `url` is the active tab's URL for scope/comparison;
-  // `q` is an optional free-text search (version title, page title, or u/handle).
-  getFeed: (sort: FeedSort, scope: FeedScope, url?: string, q?: string) =>
-    api<FeedResult>(`/feed?sort=${sort}&scope=${scope}&url=${encodeURIComponent(url ?? '')}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
+  // `q` is an optional free-text search; `offset`/`limit` paginate (infinite scroll).
+  getFeed: (sort: FeedSort, scope: FeedScope, url?: string, q?: string, offset?: number, limit?: number) =>
+    api<FeedResult>(`/feed?sort=${sort}&scope=${scope}&url=${encodeURIComponent(url ?? '')}${pageQuery(q, offset, limit)}`),
 
-  getBookmarksFeed: (scope: FeedScope, url?: string, q?: string) =>
-    api<FeedResult>(`/feed/bookmarks?scope=${scope}&url=${encodeURIComponent(url ?? '')}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
+  getBookmarksFeed: (scope: FeedScope, url?: string, q?: string, offset?: number, limit?: number) =>
+    api<FeedResult>(`/feed/bookmarks?scope=${scope}&url=${encodeURIComponent(url ?? '')}${pageQuery(q, offset, limit)}`),
 
   // The viewer's own versions (newest first) — the "By you" tab.
-  getMyFeed: (scope: FeedScope, url?: string, q?: string) =>
-    api<FeedResult>(`/feed?mine=1&scope=${scope}&url=${encodeURIComponent(url ?? '')}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
+  getMyFeed: (scope: FeedScope, url?: string, q?: string, offset?: number, limit?: number) =>
+    api<FeedResult>(`/feed?mine=1&scope=${scope}&url=${encodeURIComponent(url ?? '')}${pageQuery(q, offset, limit)}`),
 
   toggleBookmark: (id: string, on: boolean) =>
     api<{ bookmarked: boolean }>(`/versions/${id}/bookmark`, { method: on ? 'POST' : 'DELETE' }),

@@ -62,6 +62,7 @@ export function VersionRow({
   return (
     <div
       className={`version-row ${active ? 'active' : ''}`}
+      data-vid={v.id}
       role="button"
       title="Apply this modification to the page"
       onClick={() => onApply(v)}

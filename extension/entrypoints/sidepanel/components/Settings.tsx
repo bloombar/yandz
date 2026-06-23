@@ -8,8 +8,10 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Trash2 } from 'lucide-react';
+import { browser } from 'wxt/browser';
 import { Api, type PublicUser, type ScopedPatchEntry } from '../../../lib/api.js';
 import { describePatch } from '../../../lib/describe-patch.js';
+import { ITEMS_PER_PAGE_DEFAULT, ITEMS_PER_PAGE_MIN, ITEMS_PER_PAGE_MAX } from '../../../lib/config.js';
 import { PanelHeader } from './PanelHeader.js';
 
 interface Props {
@@ -19,12 +21,13 @@ interface Props {
   messageTab: (payload: unknown) => Promise<boolean> | void;
 }
 
-type SettingsTab = 'people' | 'global' | 'site';
+type SettingsTab = 'people' | 'global' | 'site' | 'prefs';
 
 const TABS: { key: SettingsTab; label: string }[] = [
   { key: 'people', label: 'People' },
   { key: 'global', label: 'Changes to all sites' },
   { key: 'site', label: 'Site-specific changes' },
+  { key: 'prefs', label: 'Preferences' },
 ];
 
 export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.JSX.Element {
@@ -37,6 +40,7 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
   const [blocked, setBlocked] = useState<PublicUser[]>([]);
   const [globalPatches, setGlobalPatches] = useState<ScopedPatchEntry[]>([]);
   const [sitePatches, setSitePatches] = useState<ScopedPatchEntry[]>([]);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(ITEMS_PER_PAGE_DEFAULT);
 
   const loadPeople = useCallback(async () => {
     const [f, m, b] = await Promise.all([Api.following(), Api.muted(), Api.blocked()]);
@@ -51,7 +55,17 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
     void loadPeople();
     void loadGlobal();
     void loadSite();
+    void browser.storage.local.get('itemsPerPage').then((o) => {
+      if (o.itemsPerPage !== undefined) setItemsPerPage(Number(o.itemsPerPage) || ITEMS_PER_PAGE_DEFAULT);
+    });
   }, [loadPeople, loadGlobal, loadSite]);
+
+  /** Persist the items-per-page preference (App picks it up via storage.onChanged). */
+  const saveItemsPerPage = (n: number) => {
+    const clamped = Math.min(ITEMS_PER_PAGE_MAX, Math.max(ITEMS_PER_PAGE_MIN, Math.floor(n) || ITEMS_PER_PAGE_DEFAULT));
+    setItemsPerPage(clamped);
+    void browser.storage.local.set({ itemsPerPage: clamped });
+  };
 
   /** Render one People list with an undo action per row. */
   const peopleList = (title: string, users: PublicUser[], undo: (id: string) => Promise<unknown>, label: string) => (
@@ -173,6 +187,24 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
             ))}
             {sitePatches.length === 0 && <p className="muted">None.</p>}
           </>
+        )}
+
+        {tab === 'prefs' && (
+          <div className="field">
+            <label htmlFor="items-per-page">Items per page</label>
+            <input
+              id="items-per-page"
+              type="number"
+              min={ITEMS_PER_PAGE_MIN}
+              max={ITEMS_PER_PAGE_MAX}
+              value={itemsPerPage}
+              onChange={(e) => setItemsPerPage(Number(e.target.value))}
+              onBlur={(e) => saveItemsPerPage(Number(e.target.value))}
+            />
+            <p className="field-hint muted">
+              How many results each feed loads per page as you scroll ({ITEMS_PER_PAGE_MIN}–{ITEMS_PER_PAGE_MAX}).
+            </p>
+          </div>
         )}
       </div>
     </div>

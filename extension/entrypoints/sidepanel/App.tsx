@@ -14,10 +14,19 @@ import {
   setToken,
   getCurrentUser,
   type FeedItem,
+  type FeedResult,
   type FeedScope,
   type FeedSort,
   type PublicUser,
 } from '../../lib/api.js';
+import {
+  ITEMS_PER_PAGE_DEFAULT,
+  ITEMS_PER_PAGE_MIN,
+  ITEMS_PER_PAGE_MAX,
+  FEED_WINDOW_PAGES,
+  FEED_SCROLL_THRESHOLD_PX,
+} from '../../lib/config.js';
+import { useWindowedFeed } from './useWindowedFeed.js';
 import { applyVersionAnywhere } from '../../lib/apply.js';
 import { shareVersion } from '../../lib/share.js';
 import { AuthForm } from './components/AuthForm.js';
@@ -64,12 +73,11 @@ export function App(): React.JSX.Element {
   const [pageTitle, setPageTitle] = useState<string | undefined>();
   const [tab, setTab] = useState<TabKey>('foryou');
   const [scope, setScope] = useState<FeedScope>('all');
-  const [items, setItems] = useState<FeedItem[]>([]);
   const [currentPageKey, setCurrentPageKey] = useState<string | null>(null);
   const [consented, setConsented] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [listError, setListError] = useState<string | null>(null);
   const [shareNote, setShareNote] = useState<string | null>(null);
+  const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE_DEFAULT);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   // Live feed search: `searchInput` is the raw field value; `search` is the debounced
   // value actually queried (so each keystroke doesn't fire a request).
@@ -118,29 +126,13 @@ export function App(): React.JSX.Element {
 
   const lastUrlRef = useRef<string | undefined>(undefined);
 
+  // Page metadata for the active tab (url/title/consent). The feed LIST itself is
+  // fetched + windowed by useWindowedFeed below (reset whenever resetKey changes).
   const refresh = useCallback(async () => {
     const active = await getActiveTab();
     lastUrlRef.current = active.url;
     setUrl(active.url);
     setPageTitle(active.title);
-    // "This page" only applies to real web pages; otherwise force global.
-    const effScope: FeedScope = scope === 'page' && isWebUrl(active.url) ? 'page' : 'all';
-    let pageKeyNow: string | null = null;
-    try {
-      const result =
-        tab === 'bookmarks'
-          ? await Api.getBookmarksFeed(effScope, active.url, search)
-          : tab === 'byyou'
-            ? await Api.getMyFeed(effScope, active.url, search)
-            : await Api.getFeed(tab as FeedSort, effScope, active.url, search);
-      setItems(result.versions);
-      setCurrentPageKey(result.currentPageKey);
-      pageKeyNow = result.currentPageKey;
-      setListError(null);
-    } catch (err) {
-      setItems([]);
-      setListError((err as Error).message || 'Could not reach the server');
-    }
     if (isWebUrl(active.url)) {
       try {
         const key = `consent:${new URL(active.url!).origin}`;
@@ -149,18 +141,49 @@ export function App(): React.JSX.Element {
         /* opaque origin */
       }
     }
-    // Reflect whatever the content script currently has applied on the page — read
-    // from shared session storage (set by the content script, reliable across the
-    // login / panel-open timing), falling back to a direct query.
-    if (pageKeyNow) {
-      const k = `applied:${pageKeyNow}`;
-      const obj = (await browser.storage.session.get(k).catch(() => ({}))) as Record<string, unknown>;
-      const stored = obj[k] as string | null | undefined;
-      setSelectedId(stored !== undefined ? (stored ?? null) : await queryApplied());
-    } else {
-      setSelectedId(await queryApplied());
-    }
-  }, [tab, scope, search, queryApplied]);
+  }, []);
+
+  // One page of the active feed (tab/scope/url/search), for the windowed list.
+  const fetchPage = useCallback(
+    (offset: number, limit: number): Promise<FeedResult> => {
+      const effScope: FeedScope = scope === 'page' && isWebUrl(url) ? 'page' : 'all';
+      if (tab === 'bookmarks') return Api.getBookmarksFeed(effScope, url, search, offset, limit);
+      if (tab === 'byyou') return Api.getMyFeed(effScope, url, search, offset, limit);
+      return Api.getFeed(tab as FeedSort, effScope, url, search, offset, limit);
+    },
+    [tab, scope, url, search],
+  );
+
+  // After the first page loads: surface currentPageKey and reflect whatever the content
+  // script currently has applied on the page (from shared session storage, else query).
+  const onFirstPage = useCallback(
+    (res: FeedResult) => {
+      setCurrentPageKey(res.currentPageKey);
+      void (async () => {
+        if (res.currentPageKey) {
+          const k = `applied:${res.currentPageKey}`;
+          const obj = (await browser.storage.session.get(k).catch(() => ({}))) as Record<string, unknown>;
+          const stored = obj[k] as string | null | undefined;
+          setSelectedId(stored !== undefined ? (stored ?? null) : await queryApplied());
+        } else {
+          setSelectedId(await queryApplied());
+        }
+      })();
+    },
+    [queryApplied],
+  );
+
+  const feed = useWindowedFeed({
+    fetchPage,
+    pageSize,
+    windowPages: FEED_WINDOW_PAGES,
+    thresholdPx: FEED_SCROLL_THRESHOLD_PX,
+    resetKey: `${tab}|${scope}|${search}|${url ?? ''}|${pageSize}`,
+    enabled: authed === true,
+    onFirstPage,
+  });
+  const items = feed.items;
+  const setItems = feed.mutate; // in-place window updates (vote/delete/bookmark)
 
   // Reflect late auto-applies: the content script broadcasts the applied version
   // when a page loads, which may arrive after our initial query.
@@ -174,11 +197,25 @@ export function App(): React.JSX.Element {
     return () => browser.runtime.onMessage.removeListener(listener as never);
   }, []);
 
-  // Debounce the search field → committed `search` (which `refresh` depends on).
+  // Debounce the search field → committed `search` (drives the feed reset).
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 300);
     return () => clearTimeout(t);
   }, [searchInput]);
+
+  // Items-per-page preference: read once, then track live changes from Settings.
+  useEffect(() => {
+    const clamp = (n: unknown) =>
+      Math.min(ITEMS_PER_PAGE_MAX, Math.max(ITEMS_PER_PAGE_MIN, Math.floor(Number(n) || ITEMS_PER_PAGE_DEFAULT)));
+    void browser.storage.local.get('itemsPerPage').then((o) => {
+      if (o.itemsPerPage !== undefined) setPageSize(clamp(o.itemsPerPage));
+    });
+    const onChanged = (changes: Record<string, { newValue?: unknown }>, area: string) => {
+      if (area === 'local' && changes.itemsPerPage) setPageSize(clamp(changes.itemsPerPage.newValue));
+    };
+    browser.storage.onChanged.addListener(onChanged as never);
+    return () => browser.storage.onChanged.removeListener(onChanged as never);
+  }, []);
 
   useEffect(() => {
     if (authed) void refresh();
@@ -395,7 +432,8 @@ export function App(): React.JSX.Element {
             />
           </div>
 
-          <div className="list">
+          <div className="list" ref={feed.listRef} onScroll={feed.onScroll}>
+            {feed.loadingBefore && <p className="muted feed-sentinel">Loading…</p>}
             {items.map((v) => (
               <VersionRow
                 key={v.id}
@@ -413,9 +451,11 @@ export function App(): React.JSX.Element {
                 onOpenDetails={openDetails}
               />
             ))}
+            {feed.loadingAfter && items.length > 0 && <p className="muted feed-sentinel">Loading…</p>}
             {items.length === 0 &&
-              (listError ? (
-                <p className="error">Couldn’t load the feed: {listError}</p>
+              !feed.loadingAfter &&
+              (feed.error ? (
+                <p className="error">Couldn’t load the feed: {feed.error}</p>
               ) : search ? (
                 <p className="muted">No matches for “{search}”.</p>
               ) : (

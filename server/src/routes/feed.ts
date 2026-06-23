@@ -18,6 +18,16 @@ import { sortVersions, type SortMode } from '@yandz/shared';
 export const feedRouter = Router();
 
 const FEED_LIMIT = 50;
+// Headroom for the in-app rank (foryou/latest) and bookmark recency order before we
+// paginate: pages slice into this candidate set, so it bounds reachable scroll depth.
+const CANDIDATE_CAP = 1000;
+
+/** Parse & clamp the pagination query params. */
+function pageParams(req: Request): { offset: number; limit: number } {
+  const offset = Math.max(0, Math.floor(Number(req.query.offset) || 0));
+  const limit = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit) || FEED_LIMIT)));
+  return { offset, limit };
+}
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -63,40 +73,46 @@ feedRouter.get('/', async (req: Request, res: Response) => {
   const mine = String(req.query.mine ?? '') === '1';
   const { currentPageKey, pageId } = await resolveScope(scope, rawUrl);
   const clauses = await searchClauses(String(req.query.q ?? ''));
+  const { offset, limit } = pageParams(req);
 
   // scope=page with no matching page → empty (but still report the key).
   if (scope === 'page' && !pageId) {
-    res.json({ currentPageKey, versions: [] });
+    res.json({ currentPageKey, versions: [], hasMore: false });
     return;
   }
 
-  // "By you": the viewer's own versions, newest first.
+  // "By you": the viewer's own versions, newest first (DB-level pagination).
   if (mine) {
     if (!req.userId) {
-      res.json({ currentPageKey, versions: [] });
+      res.json({ currentPageKey, versions: [], hasMore: false });
       return;
     }
     const filter: Record<string, unknown> = { authorId: new Types.ObjectId(req.userId) };
     if (pageId) filter.pageId = pageId;
     if (clauses.length) filter.$or = clauses;
-    const docs = await Version.find(filter).sort({ createdAt: -1 }).limit(FEED_LIMIT).lean();
-    res.json({ currentPageKey, versions: await serializeVersions(docs as unknown as RawVersion[], req.userId) });
+    const docs = await Version.find(filter).sort({ createdAt: -1, _id: -1 }).skip(offset).limit(limit + 1).lean();
+    const hasMore = docs.length > limit;
+    const page = (hasMore ? docs.slice(0, limit) : docs) as unknown as RawVersion[];
+    res.json({ currentPageKey, versions: await serializeVersions(page, req.userId), hasMore });
     return;
   }
 
+  // Block-filter authoritatively IN the query so every page excludes blocked authors
+  // (and pages stay contiguous). Rank the block-filtered candidate set, then slice.
+  const social = await loadViewerSocial(req.userId ?? null);
   const versionFilter: Record<string, unknown> = pageId ? { pageId } : {};
   if (clauses.length) versionFilter.$or = clauses;
-  const [social, raw] = await Promise.all([
-    loadViewerSocial(req.userId ?? null),
-    Version.find(versionFilter)
-      .sort({ createdAt: -1 })
-      .limit(500) // headroom before block-filter + rank + final slice
-      .lean(),
-  ]);
+  if (social.blockSet.size) versionFilter.authorId = { $nin: [...social.blockSet] };
+  // `_id` is a stable tiebreaker so the candidate order (and thus offset pagination)
+  // is deterministic even when versions share a createdAt — otherwise pages would
+  // overlap/miss as ties get broken differently per query.
+  const raw = await Version.find(versionFilter)
+    .sort({ createdAt: -1, _id: -1 })
+    .limit(CANDIDATE_CAP)
+    .lean();
 
-  const visible = (raw as unknown as RawVersion[]).filter((v) => !social.blockSet.has(String(v.authorId)));
-  const ranked = sortVersions(
-    visible.map((v) => ({
+  const rankedAll = sortVersions(
+    (raw as unknown as RawVersion[]).map((v) => ({
       hotScore: v.hotScore,
       wilsonScore: v.wilsonScore,
       createdAtMs: v.createdAt ? new Date(v.createdAt).getTime() : 0,
@@ -105,11 +121,11 @@ feedRouter.get('/', async (req: Request, res: Response) => {
     })),
     sort,
     social.followSet,
-  )
-    .slice(0, FEED_LIMIT)
-    .map((r) => r._doc);
+  );
+  const hasMore = rankedAll.length > offset + limit;
+  const page = rankedAll.slice(offset, offset + limit).map((r) => r._doc);
 
-  res.json({ currentPageKey, versions: await serializeVersions(ranked, req.userId ?? null) });
+  res.json({ currentPageKey, versions: await serializeVersions(page, req.userId ?? null), hasMore });
 });
 
 // GET /feed/bookmarks — the viewer's saved versions, newest-bookmarked first.
@@ -118,14 +134,15 @@ feedRouter.get('/bookmarks', requireAuth, async (req: Request, res: Response) =>
   const rawUrl = String(req.query.url ?? '');
   const { currentPageKey, pageId } = await resolveScope(scope, rawUrl);
   if (scope === 'page' && !pageId) {
-    res.json({ currentPageKey, versions: [] });
+    res.json({ currentPageKey, versions: [], hasMore: false });
     return;
   }
   const clauses = await searchClauses(String(req.query.q ?? ''));
+  const { offset, limit } = pageParams(req);
 
   const [social, marks] = await Promise.all([
     loadViewerSocial(req.userId!),
-    Bookmark.find({ userId: new Types.ObjectId(req.userId!) }).sort({ createdAt: -1 }).limit(500).lean(),
+    Bookmark.find({ userId: new Types.ObjectId(req.userId!) }).sort({ createdAt: -1, _id: -1 }).limit(CANDIDATE_CAP).lean(),
   ]);
   const versionIds = marks.map((m) => m.versionId);
 
@@ -134,12 +151,14 @@ feedRouter.get('/bookmarks', requireAuth, async (req: Request, res: Response) =>
   if (clauses.length) filter.$or = clauses;
   const docs = await Version.find(filter).lean();
 
-  // Preserve bookmark recency order, then drop blocked authors.
+  // Preserve bookmark recency order, drop blocked authors, THEN paginate so each page
+  // is block-filtered and contiguous.
   const byId = new Map(docs.map((d) => [String(d._id), d as unknown as RawVersion]));
   const ordered = versionIds
     .map((id) => byId.get(String(id)))
-    .filter((v): v is RawVersion => !!v && !social.blockSet.has(String(v.authorId)))
-    .slice(0, FEED_LIMIT);
+    .filter((v): v is RawVersion => !!v && !social.blockSet.has(String(v.authorId)));
+  const hasMore = ordered.length > offset + limit;
+  const page = ordered.slice(offset, offset + limit);
 
-  res.json({ currentPageKey, versions: await serializeVersions(ordered, req.userId!) });
+  res.json({ currentPageKey, versions: await serializeVersions(page, req.userId!), hasMore });
 });
