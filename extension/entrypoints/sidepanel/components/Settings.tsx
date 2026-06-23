@@ -7,7 +7,7 @@
  *    one (or all for a site) demotes it to apply only on its original page.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, MoreVertical } from 'lucide-react';
 import { browser } from 'wxt/browser';
 import { Api, type PublicUser, type ScopedPatchEntry } from '../../../lib/api.js';
 import type { PatchScope } from '@yandz/shared';
@@ -46,6 +46,7 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
   const [patchingAllowed, setPatchingAllowed] = useState(false);
   const [siteSearch, setSiteSearch] = useState('');
   const [expandedSites, setExpandedSites] = useState<Set<string>>(new Set()); // collapsed by default
+  const [openMenu, setOpenMenu] = useState<string | null>(null); // which site's kebab menu is open
   const toggleSite = (site: string) =>
     setExpandedSites((prev) => {
       const next = new Set(prev);
@@ -203,19 +204,32 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
                     <span className="muted" style={{ fontSize: 11 }}>
                       {entries.length}
                     </span>
-                    <button
-                      className="btn"
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        void (async () => {
-                          await Api.demoteSitePatches(site);
-                          refreshPage();
-                          await loadSite();
-                        })();
-                      }}
-                    >
-                      Delete all
-                    </button>
+                    {/* Kebab menu — keeps "Delete all" out of sight until needed. */}
+                    <div className="kebab" onClick={(ev) => ev.stopPropagation()}>
+                      <button
+                        className="icon-btn"
+                        aria-label="More"
+                        title="More"
+                        onClick={() => setOpenMenu((m) => (m === site ? null : site))}
+                      >
+                        <MoreVertical size={14} />
+                      </button>
+                      {openMenu === site && (
+                        <div className="kebab-menu" onMouseLeave={() => setOpenMenu(null)}>
+                          <button
+                            className="kebab-item"
+                            onClick={async () => {
+                              setOpenMenu(null);
+                              await Api.demoteSitePatches(site);
+                              refreshPage();
+                              await loadSite();
+                            }}
+                          >
+                            Delete all on this site
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   {open && entries.map((e) => changeRow(e, 'page'))}
                 </div>

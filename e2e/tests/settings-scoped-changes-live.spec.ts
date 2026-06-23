@@ -86,6 +86,12 @@ test('site-specific changes: per-site collapsible ChangeItem rows + site search'
     await page.locator('.change-desc').first().click();
     await expect(page.locator('.change-details').first()).toBeVisible();
 
+    // "Delete all" lives in a kebab menu, not an always-visible button.
+    expect(await page.locator('.site-group .kebab-menu').count()).toBe(0);
+    await page.locator('.site-group .kebab > .icon-btn').click();
+    await expect(page.locator('.site-group .kebab-menu')).toBeVisible();
+    expect(await page.getByText('Delete all on this site').count()).toBe(1);
+
     // Site search filters the groups.
     await page.getByPlaceholder('Search sites').fill('zzz-no-match');
     await expect(page.locator('.site-group')).toHaveCount(0);
