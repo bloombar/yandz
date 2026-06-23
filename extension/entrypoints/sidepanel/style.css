@@ -22,6 +22,12 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .revert-link:hover { text-decoration: underline; }
 /* Infinite-scroll loading sentinel (top/bottom of the windowed list). */
 .feed-sentinel { text-align: center; padding: 10px 12px; font-size: 12px; }
+/* Settings → Site-specific changes: collapsible per-site groups. */
+.site-group { border-bottom: 1px solid #8882; }
+.site-group-header { display: flex; align-items: center; gap: 6px; padding: 8px 0; cursor: pointer; }
+.site-host { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.site-chevron { flex-shrink: 0; transition: transform 0.12s; }
+.site-chevron.open { transform: rotate(90deg); }
 /* Live search above the feed list. */
 .search-bar { padding: 8px 12px 0; }
 .search-input { width: 100%; padding: 6px 8px; border: 1px solid #8884; border-radius: 6px; font: inherit; background: transparent; color: inherit; }

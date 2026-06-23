@@ -7,11 +7,12 @@
  *    one (or all for a site) demotes it to apply only on its original page.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { browser } from 'wxt/browser';
 import { Api, type PublicUser, type ScopedPatchEntry } from '../../../lib/api.js';
-import { describePatch } from '../../../lib/describe-patch.js';
+import type { PatchScope } from '@yandz/shared';
 import { ITEMS_PER_PAGE_DEFAULT, ITEMS_PER_PAGE_MIN, ITEMS_PER_PAGE_MAX } from '../../../lib/config.js';
+import { ChangeItem } from './ChangeItem.js';
 import { PanelHeader } from './PanelHeader.js';
 
 interface Props {
@@ -41,6 +42,14 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
   const [globalPatches, setGlobalPatches] = useState<ScopedPatchEntry[]>([]);
   const [sitePatches, setSitePatches] = useState<ScopedPatchEntry[]>([]);
   const [itemsPerPage, setItemsPerPage] = useState<number>(ITEMS_PER_PAGE_DEFAULT);
+  const [siteSearch, setSiteSearch] = useState('');
+  const [expandedSites, setExpandedSites] = useState<Set<string>>(new Set()); // collapsed by default
+  const toggleSite = (site: string) =>
+    setExpandedSites((prev) => {
+      const next = new Set(prev);
+      next.has(site) ? next.delete(site) : next.add(site);
+      return next;
+    });
 
   const loadPeople = useCallback(async () => {
     const [f, m, b] = await Promise.all([Api.following(), Api.muted(), Api.blocked()]);
@@ -93,30 +102,38 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
     </>
   );
 
-  /** One scoped-change card with a delete (demote) button. */
-  const patchCard = (e: ScopedPatchEntry, onDelete: () => void) => (
-    <div className="card" key={`${e.versionId}:${e.order}`}>
-      <div className="row">
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {describePatch(e.patch)}
-          </div>
-          <div className="muted" style={{ fontSize: 11 }}>
-            from “{e.versionName}” · {e.site || 'unknown site'}
-          </div>
-        </div>
-        <button className="icon-btn" aria-label="Delete this change" title="Delete this change" onClick={onDelete}>
-          <Trash2 size={14} />
-        </button>
-      </div>
-    </div>
+  /** Reflect a scope change/demotion across both lists + the loaded page. */
+  const afterScope = async () => {
+    refreshPage();
+    await Promise.all([loadGlobal(), loadSite()]);
+  };
+
+  /** One scoped change, rendered with the SAME expandable layout as the editor's change
+   *  list (click to see details, scope dropdown). `demoteTo` is the scope the trash
+   *  reduces it to (global→site, site→page). */
+  const changeRow = (e: ScopedPatchEntry, demoteTo: PatchScope) => (
+    <ChangeItem
+      key={`${e.versionId}:${e.order}`}
+      patch={e.patch}
+      onHighlight={() => {}}
+      onDelete={async () => {
+        await Api.setPatchScope(e.versionId, e.order, demoteTo);
+        await afterScope();
+      }}
+      onScopeChange={async (scope) => {
+        await Api.setPatchScope(e.versionId, e.order, scope);
+        await afterScope();
+      }}
+    />
   );
 
-  // Group site-scoped changes by the site they apply to.
+  // Group site-scoped changes by the site they apply to, filtered by the site search.
   const bySite = sitePatches.reduce<Record<string, ScopedPatchEntry[]>>((acc, e) => {
     (acc[e.site] ??= []).push(e);
     return acc;
   }, {});
+  const siteQuery = siteSearch.trim().toLowerCase();
+  const filteredSites = Object.entries(bySite).filter(([site]) => site.toLowerCase().includes(siteQuery));
 
   return (
     <div className="list">
@@ -142,14 +159,7 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
             <p className="muted" style={{ marginTop: 0 }}>
               Changes you apply to every web site. Deleting one keeps it on the site it was made on.
             </p>
-            {globalPatches.map((e) =>
-              patchCard(e, async () => {
-                await Api.setPatchScope(e.versionId, e.order, 'site');
-                refreshPage();
-                await loadGlobal();
-                await loadSite();
-              }),
-            )}
+            {globalPatches.map((e) => changeRow(e, 'site'))}
             {globalPatches.length === 0 && <p className="muted">None.</p>}
           </>
         )}
@@ -159,33 +169,54 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
             <p className="muted" style={{ marginTop: 0 }}>
               Changes you apply across a whole site. Deleting one keeps it on the page it was made on.
             </p>
-            {Object.entries(bySite).map(([site, entries]) => (
-              <div key={site}>
-                <div className="row" style={{ marginTop: 8 }}>
-                  <h3 className="muted" style={{ flex: 1, margin: 0 }}>
-                    {site || 'unknown site'}
-                  </h3>
-                  <button
-                    className="btn"
-                    onClick={async () => {
-                      await Api.demoteSitePatches(site);
-                      refreshPage();
-                      await loadSite();
-                    }}
+            <input
+              className="search-input"
+              type="search"
+              placeholder="Search sites"
+              aria-label="Search sites"
+              value={siteSearch}
+              onChange={(e) => setSiteSearch(e.target.value)}
+              style={{ marginBottom: 8 }}
+            />
+            {filteredSites.map(([site, entries]) => {
+              const open = expandedSites.has(site);
+              return (
+                <div className="site-group" key={site}>
+                  <div
+                    className="site-group-header"
+                    role="button"
+                    aria-expanded={open}
+                    title={open ? 'Collapse' : 'Expand'}
+                    onClick={() => toggleSite(site)}
                   >
-                    Delete all
-                  </button>
+                    <ChevronRight size={14} className={`site-chevron ${open ? 'open' : ''}`} />
+                    <span className="site-host">{site || 'unknown site'}</span>
+                    <span className="muted" style={{ fontSize: 11 }}>
+                      {entries.length}
+                    </span>
+                    <button
+                      className="btn"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        void (async () => {
+                          await Api.demoteSitePatches(site);
+                          refreshPage();
+                          await loadSite();
+                        })();
+                      }}
+                    >
+                      Delete all
+                    </button>
+                  </div>
+                  {open && entries.map((e) => changeRow(e, 'page'))}
                 </div>
-                {entries.map((e) =>
-                  patchCard(e, async () => {
-                    await Api.setPatchScope(e.versionId, e.order, 'page');
-                    refreshPage();
-                    await loadSite();
-                  }),
-                )}
-              </div>
-            ))}
-            {sitePatches.length === 0 && <p className="muted">None.</p>}
+              );
+            })}
+            {sitePatches.length === 0 ? (
+              <p className="muted">None.</p>
+            ) : (
+              filteredSites.length === 0 && <p className="muted">No sites matching “{siteSearch}”.</p>
+            )}
           </>
         )}
 
