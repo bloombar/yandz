@@ -148,7 +148,14 @@ function elementSnapshot(el: Element): Record<string, unknown> {
 export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_start',
+  // Run in EVERY frame so each cross-origin iframe is patched as its own page (its own
+  // URL, its own versions) — the Same-Origin Policy makes reaching into them from the
+  // top frame impossible, so each frame patches itself. Top-frame-only surfaces (the
+  // floating icon, consent modal, and panel-driven editing) are guarded by `isTop`.
+  allFrames: true,
   async main(ctx) {
+    // Whether this instance is the top-level page (vs. an embedded iframe).
+    const isTop = window === window.top;
     const engine = new PatchEngine();
     const overlay = new OverlayRenderer();
     let current: VersionSummary | null = null;
@@ -262,7 +269,10 @@ export default defineContentScript({
     }
     ctx.onInvalidated(() => observer.disconnect());
 
-    // Messages from the side panel: switch version, revert, grant consent, pick, draw.
+    // Messages from the side panel (switch version, revert, pick, draw, etc.) drive the
+    // editing UI, which is top-frame only. Subframes patch themselves automatically and
+    // don't participate in panel-driven editing, so they skip this listener.
+    if (isTop)
     browser.runtime.onMessage.addListener((msg: any) => {
       switch (msg?.type) {
         case 'yandz:apply-version': {
@@ -394,31 +404,38 @@ export default defineContentScript({
       else revertToOriginal();
     });
 
-    // Fetch versions + the personal layer and mount the floating icon REGARDLESS of
-    // consent (these are reads, not page modifications — the icon is just the panel
-    // entry point). Done BEFORE any modal await so a consent grant (from the modal or
-    // another tab) has data ready to apply. Patches are applied only when consented.
+    // Only real web documents are patch-able. Subframes are often about:blank / data:
+    // / tiny tracker iframes — skip those entirely (no fetch, no apply) to avoid
+    // needless requests. (The top frame is always an http(s) page.)
+    if (!/^https?:\/\//.test(location.href)) return;
+
+    // Fetch this frame's versions + personal layer and (top frame) mount the floating
+    // icon REGARDLESS of consent (these are reads, not modifications). Done BEFORE any
+    // modal await so a consent grant (modal or another tab) has data ready to apply.
+    // Each frame fetches for ITS OWN URL, so cross-origin iframes get their own page's
+    // versions independently of the outer page.
     try {
       data = await getVersions(location.href);
     } catch {
       return; // backend unreachable
     }
     personalPatches = await getMyPatches(location.href);
-    if (data && data.versions.length > 0) {
+    if (isTop && data && data.versions.length > 0) {
       mountFloatingIcon({
         count: data.versions.length,
         onClick: () => browser.runtime.sendMessage({ type: 'yandz:open-panel' }),
       });
     }
 
-    // Determine consent. Already granted → apply now. First run (no decision yet) →
-    // prompt with the in-page modal; the storage listener applies once the user
-    // chooses (or consent is granted elsewhere). Declined → apply nothing.
+    // Determine consent. Already granted → apply now. First run (no decision yet, top
+    // frame only) → prompt with the in-page modal; the storage listener applies once
+    // the user chooses (or consent is granted elsewhere). Subframes never prompt — they
+    // apply automatically once the top-frame decision grants consent. Declined → nothing.
     const decision = await getConsent();
     if (decision === 'granted') {
       consented = true;
       await applyForPage();
-    } else if (decision === undefined) {
+    } else if (decision === undefined && isTop) {
       const granted = await showConsentModal();
       await setConsent(granted ? 'granted' : 'declined'); // storage listener applies on grant
     }
