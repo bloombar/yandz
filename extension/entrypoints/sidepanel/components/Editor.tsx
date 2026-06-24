@@ -376,10 +376,6 @@ function PickedEditor({
   onClose: () => void;
 }): React.JSX.Element {
   const [text, setText] = useState(picked.snapshot.text);
-  const [cssProp, setCssProp] = useState('color');
-  const [cssVal, setCssVal] = useState('');
-  const [attr, setAttr] = useState('alt');
-  const [attrVal, setAttrVal] = useState('');
 
   const isImage = picked.snapshot.tagName === 'img';
   const title = isImage ? 'Editing image' : `Editing <${picked.snapshot.tagName}>`;
@@ -428,68 +424,6 @@ function PickedEditor({
           <p className="field-hint muted">Pick an image to swap in for this one.</p>
         </div>
       )}
-
-      {/* CSS override */}
-      <div className="field">
-        <label>CSS override</label>
-        <div className="field-row">
-          <input value={cssProp} onChange={(e) => setCssProp(e.target.value)} placeholder="property" />
-          <input value={cssVal} onChange={(e) => setCssVal(e.target.value)} placeholder="value" />
-        </div>
-        <button
-          className="btn"
-          onClick={() =>
-            onAdd({ op: 'cssOverride', target: picked.target, payload: { declarations: { [cssProp]: cssVal } } })
-          }
-        >
-          Add CSS
-        </button>
-      </div>
-
-      {/* Attribute change */}
-      <div className="field">
-        <label>Attribute</label>
-        <div className="field-row">
-          <input value={attr} onChange={(e) => setAttr(e.target.value)} placeholder="attr" />
-          <input value={attrVal} onChange={(e) => setAttrVal(e.target.value)} placeholder="value" />
-        </div>
-        <button
-          className="btn"
-          onClick={() =>
-            onAdd({
-              op: 'attrChange',
-              target: picked.target,
-              // Capture the element's current value of this attribute for the diff.
-              payload: { attr, value: attrVal, from: picked.snapshot.attrs[attr] },
-            })
-          }
-        >
-          Set attribute
-        </button>
-      </div>
-
-      {/* Annotations */}
-      <div className="field">
-        <label>Annotate</label>
-        <div className="field-row">
-          <button
-            className="btn"
-            onClick={() =>
-              onAdd({ op: 'annotation', target: picked.target, payload: { kind: 'highlight', color: '#ff0' } })
-            }
-          >
-            Highlight
-          </button>
-          <button
-            className="btn"
-            onClick={() =>
-              onAdd({ op: 'annotation', target: picked.target, payload: { kind: 'note', color: '#ff0', body: text } })
-            }
-          >
-            Add note
-          </button>
-        </div>
-      </div>
 
       {/* Done / cancel — close the form whether or not changes were made (changes
           auto-save as they're added). */}
