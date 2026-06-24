@@ -22,7 +22,7 @@ interface Props {
 
 export function VersionChanges({
   version: v,
-  initialTab = 'comments',
+  initialTab = 'changes',
   messageTab,
   onClose,
   onOpenProfile,
@@ -50,7 +50,7 @@ export function VersionChanges({
         )}
       </div>
 
-      <PanelTabs tab={tab} setTab={setTab} changeCount={v.patches.length} />
+      <PanelTabs tab={tab} setTab={setTab} changeCount={v.patches.length} commentCount={v.commentCount} />
 
       <div className="panel-body">
         {tab === 'comments' ? (

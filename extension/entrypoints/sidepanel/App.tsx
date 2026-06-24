@@ -46,6 +46,7 @@ type View =
       // Editing the viewer's OWN existing version (update it, no new version).
       editVersionId?: string;
       editName?: string;
+      editCommentCount?: number;
       // Deriving from another user's version (creates a new attributed version).
       baseVersionId?: string;
       baseAuthorHandle?: string;
@@ -277,12 +278,12 @@ export function App(): React.JSX.Element {
    *  the version, read-only otherwise; `tab` selects the initial tab. */
   const openVersionPanel = (v: FeedItem, tab: VersionTab) => {
     if (currentUserId && v.author.id === currentUserId)
-      push({ name: 'editor', editVersionId: v.id, editName: v.name, initialTab: tab });
+      push({ name: 'editor', editVersionId: v.id, editName: v.name, editCommentCount: v.commentCount, initialTab: tab });
     else push({ name: 'changes', version: v, initialTab: tab });
   };
 
-  /** "See details": open the panel defaulting to Comments if any exist, else Changes. */
-  const openDetails = (v: FeedItem) => openVersionPanel(v, v.commentCount > 0 ? 'comments' : 'changes');
+  /** "See details": open the panel on the Changes tab. */
+  const openDetails = (v: FeedItem) => openVersionPanel(v, 'changes');
 
   /** Start (or continue) an editing session with a tool. */
   const startTool = (tool: 'pick' | 'draw') => {
@@ -449,6 +450,7 @@ export function App(): React.JSX.Element {
           pageTitle={pageTitle}
           editVersionId={view.editVersionId}
           editName={view.editName}
+          commentCount={view.editCommentCount ?? 0}
           baseVersionId={view.baseVersionId}
           baseAuthorHandle={view.baseAuthorHandle}
           baseName={view.baseName}

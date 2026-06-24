@@ -8,6 +8,7 @@
  * otherwise it creates a brand-new version.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { X } from 'lucide-react';
 import { browser } from 'wxt/browser';
 import { Api } from '../../../lib/api.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../../lib/config.js';
@@ -44,6 +45,8 @@ interface Props {
   /** Editing the viewer's OWN existing version — updates it in place (no new version). */
   editVersionId?: string;
   editName?: string;
+  /** Comment count for the tab label (from the feed item); 0 for a new version. */
+  commentCount?: number;
   baseVersionId?: string;
   /** Handle of the base version's author, shown in the header ("based on … by u/x"). */
   baseAuthorHandle?: string;
@@ -67,6 +70,7 @@ export function Editor({
   pageTitle,
   editVersionId,
   editName,
+  commentCount = 0,
   baseVersionId,
   baseAuthorHandle,
   baseName,
@@ -301,7 +305,7 @@ export function Editor({
         onClose={() => void done()}
       />
 
-      <PanelTabs tab={tab} setTab={setTab} changeCount={patches.length} />
+      <PanelTabs tab={tab} setTab={setTab} changeCount={patches.length} commentCount={commentCount} />
 
       {tab === 'comments' ? (
         <div className="panel-body">
@@ -314,7 +318,14 @@ export function Editor({
           </p>
           {hint && <div className="error">{hint}</div>}
 
-          {picked && <PickedEditor picked={picked} onAdd={addPatch} onSwapImage={swapImage} />}
+          {picked && (
+            <PickedEditor
+              picked={picked}
+              onAdd={addPatch}
+              onSwapImage={swapImage}
+              onClose={() => setPicked(null)}
+            />
+          )}
 
           {/* Newest change first; keep the real array index for delete/highlight. */}
           {patches
@@ -351,15 +362,18 @@ export function Editor({
   );
 }
 
-/** Per-element editor shown after a pick: choose what to change about that element. */
+/** Per-element editor shown after a pick: choose what to change about that element.
+ *  Framed as a single, dismissable card for the one element being edited. */
 function PickedEditor({
   picked,
   onAdd,
   onSwapImage,
+  onClose,
 }: {
   picked: PickedMessage;
   onAdd: (p: Omit<AnyPatch, 'order'>) => void;
   onSwapImage: (f: File) => void;
+  onClose: () => void;
 }): React.JSX.Element {
   const [text, setText] = useState(picked.snapshot.text);
   const [cssProp, setCssProp] = useState('color');
@@ -367,28 +381,42 @@ function PickedEditor({
   const [attr, setAttr] = useState('alt');
   const [attrVal, setAttrVal] = useState('');
 
+  const isImage = picked.snapshot.tagName === 'img';
+  const title = isImage ? 'Editing image' : `Editing <${picked.snapshot.tagName}>`;
+
   return (
     <div className="card picked-editor">
-      <div className="picked-title">
-        Editing <code>&lt;{picked.snapshot.tagName}&gt;</code>
-      </div>
-
-      {/* Text */}
-      <div className="field">
-        <label>Text</label>
-        <input value={text} onChange={(e) => setText(e.target.value)} />
-        <button
-          className="btn"
-          onClick={() =>
-            onAdd({ op: 'textReplace', target: picked.target, payload: { from: picked.snapshot.text, to: text } })
-          }
-        >
-          Replace text
+      {/* Header makes it clear this is editing ONE element, with a close (X). */}
+      <div className="picked-header">
+        <span className="picked-title">{title}</span>
+        <button className="icon-btn" aria-label="Close" title="Close" onClick={onClose}>
+          <X size={16} />
         </button>
       </div>
 
+      {/* For an image, show the current image so it's obvious which one is being edited. */}
+      {isImage && picked.snapshot.src && (
+        <img className="picked-preview" src={picked.snapshot.src} alt="" />
+      )}
+
+      {/* Text — not meaningful for images. */}
+      {!isImage && (
+        <div className="field">
+          <label>Text</label>
+          <input value={text} onChange={(e) => setText(e.target.value)} />
+          <button
+            className="btn"
+            onClick={() =>
+              onAdd({ op: 'textReplace', target: picked.target, payload: { from: picked.snapshot.text, to: text } })
+            }
+          >
+            Replace text
+          </button>
+        </div>
+      )}
+
       {/* Image (only for <img>) */}
-      {picked.snapshot.tagName === 'img' && (
+      {isImage && (
         <div className="field">
           <label>Replace image</label>
           <input
@@ -461,6 +489,14 @@ function PickedEditor({
             Add note
           </button>
         </div>
+      </div>
+
+      {/* Done / cancel — close the form whether or not changes were made (changes
+          auto-save as they're added). */}
+      <div className="picked-footer">
+        <button className="btn" onClick={onClose}>
+          Done
+        </button>
       </div>
     </div>
   );

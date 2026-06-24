@@ -44,8 +44,14 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .card { border: 1px solid #8883; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
 /* Picked-element editor: stacked, evenly spaced field groups with aligned inputs. */
 .picked-editor { display: flex; flex-direction: column; gap: 14px; }
-.picked-title { font-weight: 600; }
+/* Header row: which element is being edited + a close (X). */
+.picked-header { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid #8883; }
+.picked-title { flex: 1; font-weight: 600; }
 .picked-title code { font-family: ui-monospace, monospace; }
+/* Thumbnail of the image being edited, so it's clear which one. */
+.picked-preview { max-width: 100%; max-height: 120px; align-self: flex-start; border: 1px solid #8884; border-radius: 6px; object-fit: contain; }
+/* Footer with the Done/close action. */
+.picked-footer { display: flex; justify-content: flex-end; padding-top: 6px; border-top: 1px solid #8883; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field > label { font-size: 12px; font-weight: 600; color: #8889; }
 .field input { width: 100%; padding: 6px 8px; border: 1px solid #8884; border-radius: 6px; font: inherit; background: transparent; color: inherit; }
