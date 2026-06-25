@@ -16,7 +16,7 @@ import { PanelHeader } from './PanelHeader.js';
 import { PanelTabs, type VersionTab } from './PanelTabs.js';
 import { CommentBoard } from './CommentBoard.js';
 import { ChangeItem } from './ChangeItem.js';
-import type { AnyPatch, ElementTarget, DrawingStroke, PatchScope } from '@yandz/shared';
+import type { AnyPatch, ElementTarget, DrawingStroke, VersionScope } from '@yandz/shared';
 
 /** Auto-save lifecycle, surfaced as discrete status text near the Done button. */
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
@@ -45,6 +45,8 @@ interface Props {
   /** Editing the viewer's OWN existing version — updates it in place (no new version). */
   editVersionId?: string;
   editName?: string;
+  /** Scope of the version being edited (defaults to 'page' for a new version). */
+  editScope?: VersionScope;
   /** Comment count for the tab label (from the feed item); 0 for a new version. */
   commentCount?: number;
   baseVersionId?: string;
@@ -58,8 +60,8 @@ interface Props {
   initialTool?: 'pick' | 'draw';
   /** Returns false when the content script isn't reachable on the active tab. */
   messageTab: (payload: unknown) => Promise<boolean>;
-  /** Called with the new version's id after a successful save. */
-  onSaved: (newVersionId: string) => void;
+  /** Called with the new version's id and chosen scope after a successful save. */
+  onSaved: (newVersionId: string, scope: VersionScope) => void;
   onClose: () => void;
   /** Open a commenter's profile from the Comments tab. */
   onOpenProfile: (userId: string) => void;
@@ -70,6 +72,7 @@ export function Editor({
   pageTitle,
   editVersionId,
   editName,
+  editScope,
   commentCount = 0,
   baseVersionId,
   baseAuthorHandle,
@@ -84,6 +87,8 @@ export function Editor({
   const [patches, setPatches] = useState<AnyPatch[]>([]);
   const [picked, setPicked] = useState<PickedMessage | null>(null);
   const [name, setName] = useState(editName ?? '');
+  // The whole version's application scope, chosen by its creator.
+  const [scope, setScope] = useState<VersionScope>(editScope ?? 'page');
   const [tab, setTab] = useState<VersionTab>(initialTab);
   // The saved version id (reactive mirror of versionIdRef) for the Comments tab.
   const [savedVersionId, setSavedVersionId] = useState<string | null>(editVersionId ?? null);
@@ -111,9 +116,17 @@ export function Editor({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const patchesRef = useRef(patches);
   const nameRef = useRef(name);
+  const scopeRef = useRef(scope);
   const dirtyRef = useRef(false); // true once the user makes an edit (gates auto-save)
   patchesRef.current = patches;
   nameRef.current = name;
+  scopeRef.current = scope;
+
+  /** Change the version's scope (this page / this site / global); auto-saves like any edit. */
+  const changeScope = (next: VersionScope) => {
+    dirtyRef.current = true;
+    setScope(next);
+  };
 
   const addPatch = (p: Omit<AnyPatch, 'order'>) => {
     dirtyRef.current = true;
@@ -133,15 +146,6 @@ export function Editor({
     dirtyRef.current = true;
     setPatches(next);
     void messageTab({ type: 'yandz:apply-patches', patches: next });
-  };
-
-  /** Change where a single patch applies (this page / site / all sites). Persisted by
-   *  the debounced auto-save like any other edit. */
-  const updatePatchScope = (index: number, scope: PatchScope) => {
-    const next = patches.map((p, i) => (i === index ? ({ ...p, scope } as AnyPatch) : p));
-    dirtyRef.current = true;
-    patchesRef.current = next;
-    setPatches(next);
   };
 
   // Preload the patches we're building on: the user's own version (to keep adding
@@ -181,17 +185,18 @@ export function Editor({
       // Send the name only if the user typed one; the server auto-generates a
       // random two-word name otherwise.
       const vName = nameRef.current.trim() || undefined;
+      const vScope = scopeRef.current;
       if (versionIdRef.current == null) {
         const res = baseVersionId
-          ? await Api.forkVersion(baseVersionId, { url, title: pageTitle, name: vName, patches: patchSet })
-          : await Api.createVersion({ url, title: pageTitle, name: vName, patches: patchSet });
+          ? await Api.forkVersion(baseVersionId, { url, title: pageTitle, name: vName, patches: patchSet, scope: vScope })
+          : await Api.createVersion({ url, title: pageTitle, name: vName, patches: patchSet, scope: vScope });
         versionIdRef.current = res.id;
         setSavedVersionId(res.id); // enable the Comments tab now the version exists
         // Show the server's (possibly auto-generated) name so the user can see and
         // edit it. Doesn't mark dirty, so it won't trigger another save by itself.
         if (!nameRef.current.trim() && res.name) setName(res.name);
       } else {
-        await Api.updateVersion(versionIdRef.current, { name: vName, patches: patchSet });
+        await Api.updateVersion(versionIdRef.current, { name: vName, patches: patchSet, scope: vScope });
       }
       setLastSavedAt(Date.now());
       setStatus('saved');
@@ -215,7 +220,7 @@ export function Editor({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [patches, name, persist]);
+  }, [patches, name, scope, persist]);
 
   /** Finish editing: flush any pending save, then return to the list with the
    *  version selected (or just close if nothing was ever saved). */
@@ -226,7 +231,7 @@ export function Editor({
       timerRef.current = null;
     }
     if (patches.length > 0) await persist();
-    if (versionIdRef.current) onSaved(versionIdRef.current);
+    if (versionIdRef.current) onSaved(versionIdRef.current, scopeRef.current);
     else onClose();
   };
 
@@ -313,6 +318,27 @@ export function Editor({
         </div>
       ) : (
         <div className="panel-body">
+          {/* The creator chooses how broadly this version applies. */}
+          <div className="field scope-field">
+            <label htmlFor="version-scope">Applies to</label>
+            <select
+              id="version-scope"
+              className="sort-select"
+              value={scope}
+              onChange={(e) => changeScope(e.target.value as VersionScope)}
+            >
+              <option value="page">This page</option>
+              <option value="site">This site (whole host)</option>
+              <option value="global">Global (every site)</option>
+            </select>
+            <p className="field-hint muted">
+              {scope === 'page'
+                ? 'Applies only on this page.'
+                : scope === 'site'
+                  ? 'Others can opt in to apply it across this whole site.'
+                  : 'Others can opt in to apply it on every site.'}
+            </p>
+          </div>
           <p className="muted" style={{ marginTop: 0 }}>
             Use the select-element and draw tools in the top bar to make changes; they auto-save.
           </p>
@@ -337,7 +363,6 @@ export function Editor({
                 patch={p}
                 onHighlight={() => void messageTab({ type: 'yandz:highlight-element', target: p.target })}
                 onDelete={() => removePatch(i)}
-                onScopeChange={(scope) => updatePatchScope(i, scope)}
               />
             ))}
           {patches.length === 0 && (

@@ -1,11 +1,11 @@
 /**
- * User profile: u/handle with an inline Follow icon, a kebab menu for mute/block,
- * and the user's modifications rendered with the same VersionRow used by the feeds.
+ * User profile: u/handle with an inline Follow icon, a kebab menu for mute/block, and
+ * the user's modifications grouped into This page / This site / Global scope tabs (the
+ * tabs that don't apply to the current browser context are disabled). Newest first.
  */
 import React, { useEffect, useState } from 'react';
 import { UserPlus, UserCheck, MoreVertical } from 'lucide-react';
-import { Api, type FeedItem } from '../../../lib/api.js';
-import { applyVersionAnywhere } from '../../../lib/apply.js';
+import { Api, type FeedItem, type FeedScope } from '../../../lib/api.js';
 import { shareVersion } from '../../../lib/share.js';
 import { PanelHeader } from './PanelHeader.js';
 import { VersionRow } from './VersionRow.js';
@@ -18,28 +18,45 @@ interface ProfileData {
 
 interface Props {
   userId: string;
+  /** Normalized key of the active page (enables the This page tab), or null. */
   currentPageKey: string | null;
+  /** Host of the active page (enables the This site tab), or null. */
+  currentHost: string | null;
   currentUserId: string | null;
   onClose: () => void;
   onOpenProfile: (userId: string) => void;
   onOpenComments: (version: FeedItem) => void;
   onOpenChanges: (version: FeedItem) => void;
   onOpenDetails: (version: FeedItem) => void;
+  /** Apply (page) or activate (site/global) a version — same handler as the feed. */
+  onApply: (version: FeedItem) => void;
+}
+
+/** The lowercased host of a normalized urlKey, or '' if unparseable. */
+function hostOf(urlKey: string): string {
+  try {
+    return new URL(urlKey).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
 }
 
 export function Profile({
   userId,
   currentPageKey,
+  currentHost,
   currentUserId,
   onClose,
   onOpenProfile,
   onOpenComments,
   onOpenChanges,
   onOpenDetails,
+  onApply,
 }: Props): React.JSX.Element {
   const [data, setData] = useState<ProfileData | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [scope, setScope] = useState<'all' | 'page'>('all');
+  // Default to the most specific scope available for the current context.
+  const [scope, setScope] = useState<FeedScope>(currentPageKey ? 'page' : currentHost ? 'site' : 'global');
 
   useEffect(() => {
     setMenuOpen(false);
@@ -71,6 +88,21 @@ export function Profile({
     await Api.deleteVersion(v.id).catch(() => {});
     setMods((xs) => xs.filter((x) => x.id !== v.id));
   };
+
+  // The three scope tabs; This page / This site are disabled without a current page/site.
+  const TABS: { key: FeedScope; label: string; disabled: boolean }[] = [
+    { key: 'page', label: 'This page', disabled: !currentPageKey },
+    { key: 'site', label: 'This site', disabled: !currentHost },
+    { key: 'global', label: 'Global', disabled: false },
+  ];
+
+  // Versions for the selected scope (already newest-first from the server).
+  const shown = data.modifications.filter((m) => {
+    if (m.scope !== scope) return false;
+    if (scope === 'page') return m.page.urlKey === currentPageKey;
+    if (scope === 'site') return hostOf(m.page.urlKey) === currentHost;
+    return true; // global
+  });
 
   return (
     <div className="list">
@@ -107,28 +139,29 @@ export function Profile({
         </div>
       </PanelHeader>
 
-      {/* All ↔ This page filter (when a real web page is open), same as the feeds. */}
-      {currentPageKey && (
-        <div className="scope-toggle">
-          <div className="pills">
-            {(['all', 'page'] as const).map((s) => (
-              <button key={s} className={`pill ${scope === s ? 'active' : ''}`} onClick={() => setScope(s)}>
-                {s === 'all' ? 'All' : 'This page'}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Scope tabs (This page / This site / Global), same as the feeds. */}
+      <div className="tabs" role="tablist">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            className="tab"
+            role="tab"
+            aria-selected={scope === t.key}
+            disabled={t.disabled}
+            title={t.disabled ? 'Open a web page to see these' : undefined}
+            onClick={() => setScope(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-      {(scope === 'page' && currentPageKey
-        ? data.modifications.filter((m) => m.page.urlKey === currentPageKey)
-        : data.modifications
-      ).map((v) => (
+      {shown.map((v) => (
         <VersionRow
           key={v.id}
           version={v}
           currentUserId={currentUserId}
-          onApply={(x) => void applyVersionAnywhere(x.id, x.page.urlKey, currentPageKey)}
+          onApply={onApply}
           onVote={onVote}
           onOpenProfile={onOpenProfile}
           onOpenComments={(x) => onOpenComments(x)}
@@ -139,7 +172,7 @@ export function Profile({
           onOpenDetails={onOpenDetails}
         />
       ))}
-      {data.modifications.length === 0 && <p className="muted">No modifications yet.</p>}
+      {shown.length === 0 && <p className="muted">No modifications in this scope.</p>}
     </div>
   );
 }

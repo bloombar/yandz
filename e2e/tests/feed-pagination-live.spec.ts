@@ -1,14 +1,14 @@
 /**
  * Live e2e: windowed infinite scroll in the real side panel.
  *
- * Uses a fresh user's "By you" feed so the dataset is exactly the seeded versions
- * (isolated from other data), with a small "items per page" so windowing triggers.
- * Asserts: page size honored, scrolling down loads every page deduped with the
- * in-memory list capped at pageSize × windowPages (top trimmed), every version
+ * Uses a fresh user's Global tab + "Mine" filter so the dataset is exactly the seeded
+ * versions (isolated from other data), with a small "items per page" so windowing
+ * triggers. Asserts: page size honored, scrolling down loads every page deduped with
+ * the in-memory list capped at pageSize × windowPages (top trimmed), every version
  * reachable (no gaps), and scrolling back up restores the first item (prepend).
  *
  * (Per-page block filtering is covered authoritatively by the server unit test
- * feed-pagination.test.ts; the author-scoped "By you" feed can't exercise it.)
+ * feed-pagination.test.ts; the author-scoped "Mine" filter can't exercise it.)
  *
  * Prereqs: extension built; server on :4000.
  */
@@ -43,11 +43,12 @@ async function signup(handle: string): Promise<{ token: string; id: string }> {
   );
   return { token: r.token, id: r.user.id };
 }
+// Global-scoped so they all populate one tab (Global) regardless of page.
 async function makeVersion(token: string, url: string, name: string) {
   await fetch(`${API}/versions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify({ url, name, patches: [{ op: 'textReplace', target: { cssSelector: 'h1' }, payload: { from: 'Hello', to: name }, order: 0 }] }),
+    body: JSON.stringify({ url, name, scope: 'global', patches: [{ op: 'textReplace', target: { cssSelector: 'h1' }, payload: { from: 'Hello', to: name }, order: 0 }] }),
   });
 }
 async function getSW(ctx: BrowserContext): Promise<Worker> {
@@ -80,8 +81,9 @@ test('windowed infinite scroll pages, dedupes, trims, and restores on scroll-up'
     const page = await ctx.newPage();
     await page.goto(`chrome-extension://${extId}/sidepanel.html`, { waitUntil: 'domcontentloaded' });
 
-    // "By you" = exactly this fresh user's versions, newest first.
-    await page.locator('.tab', { hasText: 'By you' }).click();
+    // Global tab (default off a non-web page) + "Mine" + "Latest" = exactly this fresh
+    // user's versions, newest first.
+    await page.locator('.pill', { hasText: 'Mine' }).click();
     const rows = page.locator('.version-row');
     const names = page.locator('.version-row .version-name');
     await expect(rows.first()).toBeVisible({ timeout: 30_000 });

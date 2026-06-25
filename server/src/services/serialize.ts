@@ -8,6 +8,7 @@
  */
 import { Types } from 'mongoose';
 import { User, Page, Bookmark, Vote, Version } from '../models.js';
+import type { VersionScope } from '@yandz/shared';
 
 /** Minimal shape we need off a lean Version doc. */
 export interface RawVersion {
@@ -16,6 +17,7 @@ export interface RawVersion {
   authorId: Types.ObjectId | string;
   name: string;
   patches: unknown[];
+  scope?: VersionScope;
   parentVersionId?: Types.ObjectId | string | null;
   up: number;
   down: number;
@@ -31,6 +33,8 @@ export interface SerializedVersion {
   author: { id: string; handle: string };
   page: { urlKey: string; title: string };
   patches: unknown[];
+  /** The version's application scope (which tab/bar slot it belongs to). */
+  scope: VersionScope;
   parentVersionId: string | null;
   /** Author of the version this one was based on (for "based on u/x" links), or null. */
   parentAuthor: { id: string; handle: string } | null;
@@ -100,6 +104,7 @@ export async function serializeVersions(
     author: { id: String(v.authorId), handle: handleById.get(String(v.authorId)) ?? 'unknown' },
     page: pageById.get(String(v.pageId)) ?? { urlKey: '', title: '' },
     patches: v.patches,
+    scope: v.scope ?? 'page',
     parentVersionId: v.parentVersionId ? String(v.parentVersionId) : null,
     parentAuthor: parentAuthorId
       ? { id: parentAuthorId, handle: handleById.get(parentAuthorId) ?? 'unknown' }

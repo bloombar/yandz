@@ -18,16 +18,18 @@ async function makeUser(handle: string) {
   return { token: res.body.token as string, id: res.body.user.id as string };
 }
 
+// Global-scoped so they all land in one feed (the "global" tab) across many pages.
 async function makeVersion(token: string, url: string, name: string) {
   const res = await request(app)
     .post('/versions')
     .set(auth(token))
-    .send({ url, name, patches: [{ op: 'textReplace', target: { cssSelector: 'h1' }, payload: { from: 'Hello', to: name }, order: 0 }] });
+    .send({ url, name, scope: 'global', patches: [{ op: 'textReplace', target: { cssSelector: 'h1' }, payload: { from: 'Hello', to: name }, order: 0 }] });
   expect(res.status).toBe(201);
   return res.body.id as string;
 }
 
 const ids = (body: { versions: { id: string }[] }) => body.versions.map((v) => v.id);
+const G = { scope: 'global' as const };
 
 describe('feed pagination', () => {
   it('paginates with offset/limit/hasMore; pages are contiguous and unique', async () => {
@@ -35,10 +37,10 @@ describe('feed pagination', () => {
     const made: string[] = [];
     for (let i = 0; i < 6; i++) made.push(await makeVersion(a.token, `https://pa${i}.test/`, `v${i}`));
 
-    const p0 = await request(app).get('/feed').query({ sort: 'latest', limit: 2, offset: 0 }).set(auth(a.token));
-    const p1 = await request(app).get('/feed').query({ sort: 'latest', limit: 2, offset: 2 }).set(auth(a.token));
-    const p2 = await request(app).get('/feed').query({ sort: 'latest', limit: 2, offset: 4 }).set(auth(a.token));
-    const p3 = await request(app).get('/feed').query({ sort: 'latest', limit: 2, offset: 6 }).set(auth(a.token));
+    const p0 = await request(app).get('/feed').query({ ...G, sort: 'latest', limit: 2, offset: 0 }).set(auth(a.token));
+    const p1 = await request(app).get('/feed').query({ ...G, sort: 'latest', limit: 2, offset: 2 }).set(auth(a.token));
+    const p2 = await request(app).get('/feed').query({ ...G, sort: 'latest', limit: 2, offset: 4 }).set(auth(a.token));
+    const p3 = await request(app).get('/feed').query({ ...G, sort: 'latest', limit: 2, offset: 6 }).set(auth(a.token));
 
     expect(p0.body.versions).toHaveLength(2);
     expect(p0.body.hasMore).toBe(true);
@@ -59,7 +61,7 @@ describe('feed pagination', () => {
     await makeVersion(c.token, 'https://pc1.test/', 'carol1');
 
     // Before blocking, carol's versions are visible to bob.
-    const before = await request(app).get('/feed').query({ sort: 'latest', limit: 50 }).set(auth(a.token));
+    const before = await request(app).get('/feed').query({ ...G, sort: 'latest', limit: 50 }).set(auth(a.token));
     expect(before.body.versions.some((v: { name: string }) => v.name.startsWith('carol'))).toBe(true);
 
     await request(app).post(`/users/${c.id}/block`).set(auth(a.token)).expect(200);
@@ -67,7 +69,7 @@ describe('feed pagination', () => {
     // After: no page contains carol's versions, and the total drops to bob's 4.
     const seen: string[] = [];
     for (let offset = 0; offset < 20; offset += 2) {
-      const r = await request(app).get('/feed').query({ sort: 'latest', limit: 2, offset }).set(auth(a.token));
+      const r = await request(app).get('/feed').query({ ...G, sort: 'latest', limit: 2, offset }).set(auth(a.token));
       for (const v of r.body.versions as { id: string; name: string }[]) {
         expect(v.name.startsWith('carol')).toBe(false);
         seen.push(v.id);

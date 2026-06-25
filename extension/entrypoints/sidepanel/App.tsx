@@ -1,9 +1,10 @@
 /**
- * Side panel root. Renders the global feeds (For you / Latest / Bookmarks) with an
- * All ↔ This page scope toggle, and orchestrates a navigation STACK of panels
- * (profile / comments / editor / settings) where closing pops back to the previous
- * view. The top nav holds icon tools (select element, draw) that start an editing
- * session, plus settings.
+ * Side panel root. Renders the three scope feeds (This page / This site / Global), each
+ * filtered (All / Following / Mine / Bookmarked) and sorted (Your feed / Latest), with
+ * an "applied to this page" bar above the tabs showing the versions currently layered on
+ * the open page. Orchestrates a navigation STACK of panels (profile / comments / editor /
+ * settings) where closing pops back to the previous view. The top nav holds icon tools
+ * (select element, draw) that start an editing session, plus settings.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Settings as SettingsIcon, Type, Brush } from 'lucide-react';
@@ -16,9 +17,11 @@ import {
   type FeedItem,
   type FeedResult,
   type FeedScope,
+  type FeedFilter,
   type FeedSort,
   type PublicUser,
 } from '../../lib/api.js';
+import type { VersionScope } from '@yandz/shared';
 import {
   ITEMS_PER_PAGE_DEFAULT,
   ITEMS_PER_PAGE_MIN,
@@ -31,6 +34,7 @@ import { applyVersionAnywhere } from '../../lib/apply.js';
 import { shareVersion } from '../../lib/share.js';
 import { AuthForm } from './components/AuthForm.js';
 import { VersionRow } from './components/VersionRow.js';
+import { AppliedBar, type AppliedEntry } from './components/AppliedBar.js';
 import { Profile } from './components/Profile.js';
 import { Editor } from './components/Editor.js';
 import { Settings } from './components/Settings.js';
@@ -46,6 +50,7 @@ type View =
       // Editing the viewer's OWN existing version (update it, no new version).
       editVersionId?: string;
       editName?: string;
+      editScope?: VersionScope;
       editCommentCount?: number;
       // Deriving from another user's version (creates a new attributed version).
       baseVersionId?: string;
@@ -56,14 +61,24 @@ type View =
     }
   | { name: 'settings' };
 
-type TabKey = 'foryou' | 'latest' | 'byyou' | 'bookmarks';
+const SCOPE_TABS: { key: FeedScope; label: string }[] = [
+  { key: 'page', label: 'This page' },
+  { key: 'site', label: 'This site' },
+  { key: 'global', label: 'Global' },
+];
+const FILTERS: { key: FeedFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'following', label: 'Following' },
+  { key: 'mine', label: 'Mine' },
+  { key: 'bookmarked', label: 'Bookmarked' },
+];
 
 async function getActiveTab(): Promise<{ id?: number; url?: string; title?: string }> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   return { id: tab?.id, url: tab?.url, title: tab?.title };
 }
 
-/** Whether a URL is a normal web page (content scripts + this-page scope apply). */
+/** Whether a URL is a normal web page (content scripts + this-page/site scope apply). */
 function isWebUrl(url?: string): boolean {
   return !!url && /^https?:\/\//.test(url);
 }
@@ -72,10 +87,17 @@ export function App(): React.JSX.Element {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [url, setUrl] = useState<string | undefined>();
   const [pageTitle, setPageTitle] = useState<string | undefined>();
-  const [tab, setTab] = useState<TabKey>('foryou');
-  const [scope, setScope] = useState<FeedScope>('all');
+  // Feed controls: the scope tab, the in-tab filter, and the sort.
+  const [scope, setScope] = useState<FeedScope>('global');
+  const [filter, setFilter] = useState<FeedFilter>('all');
+  const [sort, setSort] = useState<FeedSort>('foryou');
   const [currentPageKey, setCurrentPageKey] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The versions currently applied to the open page, per scope (drives the applied bar
+  // and row highlighting). Reported by the content script.
+  const [applied, setApplied] = useState<AppliedEntry[]>([]);
+  // Full feed items for the viewer's active site/global versions, so the applied bar can
+  // open their details even when they aren't in the current tab's list.
+  const [appliedItems, setAppliedItems] = useState<FeedItem[]>([]);
   const [shareNote, setShareNote] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE_DEFAULT);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -90,6 +112,8 @@ export function App(): React.JSX.Element {
   const push = (v: View) => setStack((s) => [...s, v]);
   const close = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
 
+  const appliedIds = new Set(applied.map((a) => a.versionId));
+
   /** Message the content script in the active tab; false if unreachable. */
   const messageTab = useCallback(async (payload: unknown): Promise<boolean> => {
     const { id } = await getActiveTab();
@@ -102,14 +126,14 @@ export function App(): React.JSX.Element {
     }
   }, []);
 
-  /** Ask the active tab's content script which version is currently applied. */
-  const queryApplied = useCallback(async (): Promise<string | null> => {
+  /** Ask the active tab's content script which versions are currently applied (per scope). */
+  const queryApplied = useCallback(async (): Promise<AppliedEntry[]> => {
     const { id } = await getActiveTab();
-    if (id === undefined) return null;
+    if (id === undefined) return [];
     try {
-      return (await browser.tabs.sendMessage(id, { type: 'yandz:get-applied' })) as string | null;
+      return ((await browser.tabs.sendMessage(id, { type: 'yandz:get-applied' })) as AppliedEntry[]) ?? [];
     } catch {
-      return null;
+      return [];
     }
   }, []);
 
@@ -135,31 +159,37 @@ export function App(): React.JSX.Element {
     setPageTitle(active.title);
   }, []);
 
-  // One page of the active feed (tab/scope/url/search), for the windowed list.
+  // The page/site scope tabs need a real web page; off one, force the Global tab.
+  useEffect(() => {
+    if (!isWebUrl(url) && scope !== 'global') setScope('global');
+  }, [url, scope]);
+
+  // One page of the active feed (scope/filter/sort/url/search), for the windowed list.
   const fetchPage = useCallback(
     (offset: number, limit: number): Promise<FeedResult> => {
-      const effScope: FeedScope = scope === 'page' && isWebUrl(url) ? 'page' : 'all';
-      if (tab === 'bookmarks') return Api.getBookmarksFeed(effScope, url, search, offset, limit);
-      if (tab === 'byyou') return Api.getMyFeed(effScope, url, search, offset, limit);
-      return Api.getFeed(tab as FeedSort, effScope, url, search, offset, limit);
+      const effScope: FeedScope = isWebUrl(url) ? scope : 'global';
+      if (filter === 'bookmarked') return Api.getBookmarksFeed(effScope, url, search, offset, limit);
+      return Api.getFeed(effScope, filter, sort, url, search, offset, limit);
     },
-    [tab, scope, url, search],
+    [scope, filter, sort, url, search],
   );
 
   // After the first page loads: surface currentPageKey and reflect whatever the content
-  // script currently has applied on the page (from shared session storage, else query).
+  // script currently has applied (from shared session storage, else query).
   const onFirstPage = useCallback(
     (res: FeedResult) => {
       setCurrentPageKey(res.currentPageKey);
       void (async () => {
+        let list: AppliedEntry[] = [];
         if (res.currentPageKey) {
           const k = `applied:${res.currentPageKey}`;
           const obj = (await browser.storage.session.get(k).catch(() => ({}))) as Record<string, unknown>;
-          const stored = obj[k] as string | null | undefined;
-          setSelectedId(stored !== undefined ? (stored ?? null) : await queryApplied());
+          const stored = obj[k];
+          list = Array.isArray(stored) ? (stored as AppliedEntry[]) : await queryApplied();
         } else {
-          setSelectedId(await queryApplied());
+          list = await queryApplied();
         }
+        setApplied(list);
       })();
     },
     [queryApplied],
@@ -170,19 +200,34 @@ export function App(): React.JSX.Element {
     pageSize,
     windowPages: FEED_WINDOW_PAGES,
     thresholdPx: FEED_SCROLL_THRESHOLD_PX,
-    resetKey: `${tab}|${scope}|${search}|${url ?? ''}|${pageSize}`,
+    resetKey: `${scope}|${filter}|${sort}|${search}|${url ?? ''}|${pageSize}`,
     enabled: authed === true,
     onFirstPage,
   });
   const items = feed.items;
   const setItems = feed.mutate; // in-place window updates (vote/delete/bookmark)
 
-  // Reflect late auto-applies: the content script broadcasts the applied version
-  // when a page loads, which may arrive after our initial query.
+  // Keep full feed items for the viewer's active site/global versions (for the bar's
+  // "view details"). Refreshed when the page changes or activations change.
+  const loadAppliedItems = useCallback(() => {
+    if (!isWebUrl(url)) {
+      setAppliedItems([]);
+      return;
+    }
+    void Api.getActivations(url!)
+      .then((r) => setAppliedItems(r.versions))
+      .catch(() => setAppliedItems([]));
+  }, [url]);
   useEffect(() => {
-    const listener = (msg: { type?: string; urlKey?: string | null; versionId?: string | null }) => {
+    if (authed) loadAppliedItems();
+  }, [authed, loadAppliedItems]);
+
+  // Reflect late auto-applies / live layer changes: the content script broadcasts the
+  // full applied set, which may arrive after our initial query.
+  useEffect(() => {
+    const listener = (msg: { type?: string; urlKey?: string | null; applied?: AppliedEntry[] }) => {
       if (msg?.type === 'yandz:applied' && (!msg.urlKey || msg.urlKey === currentPageKeyRef.current)) {
-        setSelectedId(msg.versionId ?? null);
+        setApplied(Array.isArray(msg.applied) ? msg.applied : []);
       }
     };
     browser.runtime.onMessage.addListener(listener as never);
@@ -242,16 +287,78 @@ export function App(): React.JSX.Element {
     if (tally) setItems((xs) => xs.map((x) => (x.id === v.id ? { ...x, ...tally } : x)));
   };
 
+  /** Apply / activate a version. Page versions apply in place (or navigate to their
+   *  page); site/global versions are opted in (persisted) and then auto-apply. */
   const onApply = (v: FeedItem) => {
-    setSelectedId(v.id);
-    void applyVersionAnywhere(v.id, v.page.urlKey, currentPageKey);
+    if (v.scope === 'page') {
+      setApplied((xs) => [...xs.filter((a) => a.scope !== 'page'), { scope: 'page', versionId: v.id, name: v.name }]);
+      void applyVersionAnywhere(v.id, v.page.urlKey, currentPageKey);
+      return;
+    }
+    void (async () => {
+      const r = await Api.activate(v.id).catch(() => null);
+      if (!r) return;
+      // The new version replaces whatever held its scope slot.
+      setAppliedItems((xs) => [v, ...xs.filter((x) => x.id !== v.id && x.id !== r.replacedVersionId)]);
+      setApplied((xs) => [
+        ...xs.filter((a) => a.scope !== v.scope && a.versionId !== r.replacedVersionId),
+        { scope: v.scope, versionId: v.id, name: v.name },
+      ]);
+      await messageTab({ type: 'yandz:refresh-activations' });
+    })();
+  };
+
+  /** Turn an applied version off from the bar. Page = transient (this view); site/global
+   *  = deactivate the opt-in so it stops auto-applying. */
+  const onToggleOff = (e: AppliedEntry) => {
+    setApplied((xs) => xs.filter((a) => a.versionId !== e.versionId));
+    if (e.scope === 'page') {
+      void messageTab({ type: 'yandz:toggle-scope', scope: 'page', on: false });
+    } else {
+      setAppliedItems((xs) => xs.filter((x) => x.id !== e.versionId));
+      void Api.deactivate(e.versionId).catch(() => {});
+      void messageTab({ type: 'yandz:refresh-activations' });
+    }
+  };
+
+  /** "View details" from the applied bar: open the version's read-only changes panel. */
+  const onAppliedDetails = (e: AppliedEntry) => {
+    const known = items.find((i) => i.id === e.versionId) ?? appliedItems.find((i) => i.id === e.versionId);
+    if (known) {
+      openDetails(known);
+      return;
+    }
+    // Fallback: fetch the version and open it with minimal page context.
+    void Api.getVersion(e.versionId)
+      .then((v) => {
+        const item: FeedItem = {
+          id: v.id,
+          name: v.name,
+          author: { id: v.authorId, handle: '' },
+          patches: v.patches,
+          scope: v.scope,
+          parentVersionId: v.parentVersionId,
+          up: 0,
+          down: 0,
+          hotScore: 0,
+          commentCount: 0,
+          createdAt: '',
+          page: { urlKey: currentPageKey ?? '', title: '' },
+          bookmarked: false,
+          myVote: 0,
+          parentAuthor: null,
+          parentName: null,
+        };
+        openDetails(item);
+      })
+      .catch(() => {});
   };
 
   const onToggleBookmark = async (v: FeedItem) => {
     const on = !v.bookmarked;
     await Api.toggleBookmark(v.id, on).catch(() => {});
     setItems((xs) =>
-      tab === 'bookmarks' && !on
+      filter === 'bookmarked' && !on
         ? xs.filter((x) => x.id !== v.id)
         : xs.map((x) => (x.id === v.id ? { ...x, bookmarked: on } : x)),
     );
@@ -268,9 +375,9 @@ export function App(): React.JSX.Element {
   const onDelete = async (v: FeedItem) => {
     await Api.deleteVersion(v.id).catch(() => {});
     setItems((xs) => xs.filter((x) => x.id !== v.id));
-    if (selectedId === v.id) {
-      setSelectedId(null);
-      void messageTab({ type: 'yandz:revert' });
+    if (appliedIds.has(v.id)) {
+      setApplied((xs) => xs.filter((a) => a.versionId !== v.id));
+      void messageTab({ type: v.scope === 'page' ? 'yandz:revert' : 'yandz:refresh-activations' });
     }
   };
 
@@ -278,7 +385,14 @@ export function App(): React.JSX.Element {
    *  the version, read-only otherwise; `tab` selects the initial tab. */
   const openVersionPanel = (v: FeedItem, tab: VersionTab) => {
     if (currentUserId && v.author.id === currentUserId)
-      push({ name: 'editor', editVersionId: v.id, editName: v.name, editCommentCount: v.commentCount, initialTab: tab });
+      push({
+        name: 'editor',
+        editVersionId: v.id,
+        editName: v.name,
+        editScope: v.scope,
+        editCommentCount: v.commentCount,
+        initialTab: tab,
+      });
     else push({ name: 'changes', version: v, initialTab: tab });
   };
 
@@ -292,16 +406,19 @@ export function App(): React.JSX.Element {
         tool === 'pick' ? { type: 'yandz:start-picker' } : { type: 'yandz:start-draw', color: '#e11' },
       );
     } else {
-      // Decide what an edit session does, based on what's applied:
+      // Decide what an edit session does, based on the PAGE version that's applied:
       //  - my own applied version → keep editing THAT version (no new version);
       //  - another user's applied version → new derivative (attributed);
       //  - nothing applied (original) → new version.
-      const base = selectedId ? items.find((i) => i.id === selectedId) : undefined;
+      const pageEntry = applied.find((a) => a.scope === 'page');
+      const base = pageEntry
+        ? items.find((i) => i.id === pageEntry.versionId) ?? appliedItems.find((i) => i.id === pageEntry.versionId)
+        : undefined;
       const editingOwn = base && currentUserId && base.author.id === currentUserId;
       push({
         name: 'editor',
         ...(editingOwn
-          ? { editVersionId: base!.id, editName: base!.name }
+          ? { editVersionId: base!.id, editName: base!.name, editScope: base!.scope }
           : base
             ? { baseVersionId: base.id, baseAuthorHandle: base.author.handle, baseName: base.name }
             : {}),
@@ -313,12 +430,8 @@ export function App(): React.JSX.Element {
   if (authed === null) return <div className="app" />;
   if (!authed) return <AuthForm onAuthed={onAuthed} />;
 
-  const TABS: { key: TabKey; label: string }[] = [
-    { key: 'foryou', label: 'For you' },
-    { key: 'latest', label: 'Latest' },
-    { key: 'byyou', label: 'By you' },
-    { key: 'bookmarks', label: 'Bookmarks' },
-  ];
+  const webUrl = isWebUrl(url);
+  const showSort = filter === 'all' || filter === 'following';
 
   return (
     <div className="app">
@@ -341,42 +454,45 @@ export function App(): React.JSX.Element {
 
       {view.name === 'feed' && (
         <>
+          {/* Versions currently applied to the open page (all scopes), with toggles. */}
+          {webUrl && <AppliedBar applied={applied} onToggleOff={onToggleOff} onDetails={onAppliedDetails} />}
+
+          {/* Scope tabs: This page / This site / Global. Page/site need a real web page. */}
           <div className="tabs" role="tablist">
-            {TABS.map((t) => (
-              <button key={t.key} className="tab" role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}>
-                {t.label}
-              </button>
-            ))}
+            {SCOPE_TABS.map((t) => {
+              const disabled = !webUrl && t.key !== 'global';
+              return (
+                <button
+                  key={t.key}
+                  className="tab"
+                  role="tab"
+                  aria-selected={scope === t.key}
+                  disabled={disabled}
+                  title={disabled ? 'Open a web page to see its versions' : undefined}
+                  onClick={() => setScope(t.key)}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
           </div>
 
-          {/* All ↔ This page scope toggle (left) + applied-state control (right),
-              only when a real web page is open. */}
-          {isWebUrl(url) && (
-            <div className="scope-toggle">
-              <div className="pills">
-                {(['all', 'page'] as const).map((s) => (
-                  <button key={s} className={`pill ${scope === s ? 'active' : ''}`} onClick={() => setScope(s)}>
-                    {s === 'all' ? 'All' : 'This page'}
-                  </button>
-                ))}
-              </div>
-              {selectedId ? (
-                <span
-                  className="revert-link"
-                  role="button"
-                  title="Revert to the original page"
-                  onClick={() => {
-                    setSelectedId(null);
-                    void messageTab({ type: 'yandz:revert' });
-                  }}
-                >
-                  Revert to original
-                </span>
-              ) : (
-                <span className="muted">Showing original</span>
-              )}
+          {/* In-tab filter chips + sort. */}
+          <div className="feed-controls">
+            <div className="pills">
+              {FILTERS.map((f) => (
+                <button key={f.key} className={`pill ${filter === f.key ? 'active' : ''}`} onClick={() => setFilter(f.key)}>
+                  {f.label}
+                </button>
+              ))}
             </div>
-          )}
+            {showSort && (
+              <select className="sort-select" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as FeedSort)}>
+                <option value="foryou">Your feed</option>
+                <option value="latest">Latest</option>
+              </select>
+            )}
+          </div>
 
           {shareNote && <div className="muted" style={{ margin: '6px 12px 0' }}>{shareNote}</div>}
 
@@ -398,7 +514,7 @@ export function App(): React.JSX.Element {
               <VersionRow
                 key={v.id}
                 version={v}
-                active={v.id === selectedId}
+                active={appliedIds.has(v.id)}
                 currentUserId={currentUserId}
                 onApply={onApply}
                 onVote={onVote}
@@ -420,10 +536,10 @@ export function App(): React.JSX.Element {
                 <p className="muted">No matches for “{search}”.</p>
               ) : (
                 <p className="muted">
-                  {tab === 'bookmarks'
-                    ? 'No bookmarks yet.'
-                    : tab === 'byyou'
-                      ? 'You haven’t made any versions yet.'
+                  {filter === 'bookmarked'
+                    ? 'No bookmarks in this scope yet.'
+                    : filter === 'mine'
+                      ? 'You haven’t made any versions in this scope yet.'
                       : 'No modifications to show.'}
                 </p>
               ))}
@@ -431,7 +547,7 @@ export function App(): React.JSX.Element {
         </>
       )}
 
-      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(v) => openVersionPanel(v, 'comments')} onOpenChanges={(v) => openVersionPanel(v, 'changes')} onOpenDetails={openDetails} currentPageKey={currentPageKey} currentUserId={currentUserId} />}
+      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(v) => openVersionPanel(v, 'comments')} onOpenChanges={(v) => openVersionPanel(v, 'changes')} onOpenDetails={openDetails} onApply={onApply} currentPageKey={currentPageKey} currentHost={webUrl ? new URL(url!).hostname.toLowerCase() : null} currentUserId={currentUserId} />}
       {view.name === 'changes' && (
         <VersionChanges
           version={view.version}
@@ -442,7 +558,7 @@ export function App(): React.JSX.Element {
         />
       )}
       {view.name === 'settings' && (
-        <Settings onOpenProfile={(userId) => push({ name: 'profile', userId })} onClose={close} messageTab={messageTab} />
+        <Settings onOpenProfile={(userId) => push({ name: 'profile', userId })} onClose={close} messageTab={messageTab} onOpenChanges={openDetails} />
       )}
       {view.name === 'editor' && url && (
         <Editor
@@ -450,6 +566,7 @@ export function App(): React.JSX.Element {
           pageTitle={pageTitle}
           editVersionId={view.editVersionId}
           editName={view.editName}
+          editScope={view.editScope}
           commentCount={view.editCommentCount ?? 0}
           baseVersionId={view.baseVersionId}
           baseAuthorHandle={view.baseAuthorHandle}
@@ -457,11 +574,16 @@ export function App(): React.JSX.Element {
           initialTab={view.initialTab}
           initialTool={view.initialTool}
           messageTab={messageTab}
-          onSaved={async (newId) => {
+          onSaved={async (newId, savedScope) => {
             await refresh();
-            setSelectedId(newId);
             close();
-            await messageTab({ type: 'yandz:apply-version', versionId: newId });
+            if (savedScope === 'page') {
+              await messageTab({ type: 'yandz:apply-version', versionId: newId });
+            } else {
+              await Api.activate(newId).catch(() => {});
+              await messageTab({ type: 'yandz:refresh-activations' });
+              loadAppliedItems();
+            }
           }}
           onClose={() => {
             close();

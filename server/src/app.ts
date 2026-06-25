@@ -47,7 +47,7 @@ export function createApp(): Express {
 
   app.use('/users', usersRouter); // mixes requireAuth/withOptionalAuth per-route
   app.use('/users', relationshipsRouter);
-  app.use('/me', withOptionalAuth, meRouter); // personal scoped-patch management + lookup
+  app.use('/me', withOptionalAuth, meRouter); // activation (opt-in) management + lookup
   app.use('/uploads', uploadsRouter);
   app.use('/push', pushRouter);
 

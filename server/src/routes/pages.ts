@@ -19,6 +19,7 @@ function serializeVersion(v: any, handleById: Map<string, string>) {
     name: v.name,
     author: { id: String(v.authorId), handle: handleById.get(String(v.authorId)) ?? 'unknown' },
     patches: v.patches,
+    scope: v.scope ?? 'page',
     parentVersionId: v.parentVersionId ? String(v.parentVersionId) : null,
     up: v.up,
     down: v.down,
@@ -55,9 +56,12 @@ pagesRouter.get('/', async (req: Request, res: Response) => {
     page.title = titleParam;
   }
 
+  // Only page-scoped versions auto-apply as "the page version". Site/global versions
+  // authored on this page are public and opt-in — they surface in their own tabs and
+  // apply via activations, not here.
   const [social, versions] = await Promise.all([
     loadViewerSocial(req.userId ?? null),
-    Version.find({ pageId: page._id }).lean(),
+    Version.find({ pageId: page._id, scope: 'page' }).lean(),
   ]);
 
   // Hide content authored by blocked users (reciprocal).

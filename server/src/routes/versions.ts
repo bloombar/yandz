@@ -7,9 +7,9 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { Types } from 'mongoose';
-import { Page, Version, Vote, Comment, Bookmark } from '../models.js';
+import { Page, Version, Vote, Comment, Bookmark, Activation } from '../models.js';
 import { requireAuth } from '../lib/auth.js';
-import { pageKey } from '../services/url.js';
+import { pageKey, hostOf } from '../services/url.js';
 import { sanitizePatchList } from '../services/sanitize.js';
 import { generateVersionName } from '../services/naming.js';
 import { recomputeVersionScore } from '../services/scoring.js';
@@ -25,8 +25,10 @@ const patchInput = z.object({
   target: z.record(z.any()),
   payload: z.record(z.any()),
   order: z.number(),
-  scope: z.enum(['page', 'site', 'global']).optional(),
 });
+
+// The version's application scope is chosen by its creator (defaults to 'page').
+const scopeInput = z.enum(['page', 'site', 'global']);
 
 const createSchema = z.object({
   url: z.string().url(),
@@ -34,6 +36,7 @@ const createSchema = z.object({
   name: z.string().max(120).optional(),
   patches: z.array(patchInput).min(1),
   parentVersionId: z.string().optional(),
+  scope: scopeInput.optional(),
 });
 
 /** Find or create the Page row for a URL, returning its id + urlKey. */
@@ -79,6 +82,10 @@ async function createVersion(
     parentVersionId: opts.parent?._id ?? null,
     // rootVersionId points at the lineage root; self for an original version.
     rootVersionId: opts.parent ? opts.parent.rootVersionId ?? opts.parent._id : null,
+    // Application scope chosen by the creator; `host` is denormalized from the page
+    // so site-scoped feeds/activations resolve in one indexed query.
+    scope: body.data.scope ?? 'page',
+    host: hostOf(urlKey),
     urlMatch: { mode: 'exact', value: urlKey },
   });
   if (!created.rootVersionId) {
@@ -143,13 +150,17 @@ versionsRouter.put('/:id', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'bad id' });
     return;
   }
-  const updateSchema = z.object({ name: z.string().max(120).optional(), patches: z.array(patchInput).min(1) });
+  const updateSchema = z.object({
+    name: z.string().max(120).optional(),
+    patches: z.array(patchInput).min(1),
+    scope: scopeInput.optional(),
+  });
   const body = updateSchema.safeParse(req.body);
   if (!body.success) {
     res.status(400).json({ error: 'invalid input', details: body.error.flatten() });
     return;
   }
-  const version = await Version.findById(req.params.id).select('authorId');
+  const version = await Version.findById(req.params.id).select('authorId scope');
   if (!version) {
     res.status(404).json({ error: 'not found' });
     return;
@@ -167,8 +178,19 @@ versionsRouter.put('/:id', requireAuth, async (req, res) => {
   }
   await Version.updateOne(
     { _id: version._id },
-    { $set: { patches: clean.patches, ...(body.data.name ? { name: body.data.name } : {}) } },
+    {
+      $set: {
+        patches: clean.patches,
+        ...(body.data.name ? { name: body.data.name } : {}),
+        ...(body.data.scope ? { scope: body.data.scope } : {}),
+      },
+    },
   );
+  // Changing scope invalidates other users' opt-in activations (their denormalized
+  // scope/host no longer matches) — drop them so they re-activate under the new scope.
+  if (body.data.scope && body.data.scope !== version.scope) {
+    await Activation.deleteMany({ versionId: version._id });
+  }
   res.json({ id: String(version._id) });
 });
 
@@ -188,6 +210,7 @@ versionsRouter.get('/:id', async (req, res) => {
     name: v.name,
     authorId: String(v.authorId),
     patches: v.patches,
+    scope: v.scope ?? 'page',
     parentVersionId: v.parentVersionId ? String(v.parentVersionId) : null,
     rootVersionId: v.rootVersionId ? String(v.rootVersionId) : null,
     up: v.up,
@@ -218,6 +241,7 @@ versionsRouter.delete('/:id', requireAuth, async (req, res) => {
     Vote.deleteMany({ versionId }),
     Comment.deleteMany({ versionId }),
     Bookmark.deleteMany({ versionId }),
+    Activation.deleteMany({ versionId }),
   ]);
   await Page.updateOne({ _id: version.pageId }, { $inc: { versionCount: -1 } });
   res.json({ deleted: true });

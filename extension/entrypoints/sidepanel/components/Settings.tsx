@@ -1,52 +1,61 @@
 /**
- * Account settings, in three tabs:
+ * Account settings, in four tabs:
  *  - People: the viewer's Following / Muted / Blocked lists (each undoable).
- *  - Changes to all sites: the viewer's global-scoped changes; deleting one demotes it
- *    to apply only across the site it was made on.
- *  - Site-specific changes: the viewer's site-scoped changes grouped by site; deleting
- *    one (or all for a site) demotes it to apply only on its original page.
+ *  - Global: versions the viewer has activated on every site; deactivating one stops it
+ *    auto-applying.
+ *  - Site: versions the viewer has activated across a whole site, grouped by host;
+ *    deactivating one stops it auto-applying there.
+ *  - Preferences: patching consent + items-per-page.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { ChevronRight, MoreVertical } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { browser } from 'wxt/browser';
-import { Api, type PublicUser, type ScopedPatchEntry } from '../../../lib/api.js';
-import type { PatchScope } from '@yandz/shared';
+import { Api, type PublicUser, type FeedItem } from '../../../lib/api.js';
 import { ITEMS_PER_PAGE_DEFAULT, ITEMS_PER_PAGE_MIN, ITEMS_PER_PAGE_MAX } from '../../../lib/config.js';
 import { getConsent, setConsent } from '../../../lib/ui/consent-modal.js';
-import { ChangeItem } from './ChangeItem.js';
 import { PanelHeader } from './PanelHeader.js';
 
 interface Props {
   onOpenProfile: (userId: string) => void;
   onClose: () => void;
-  /** Tell the loaded page to re-fetch + re-apply the personal layer (after a demote). */
+  /** Tell the loaded page to re-fetch + re-apply activations (after a deactivate). */
   messageTab: (payload: unknown) => Promise<boolean> | void;
+  /** Open a version's read-only details. */
+  onOpenChanges: (version: FeedItem) => void;
 }
 
 type SettingsTab = 'people' | 'global' | 'site' | 'prefs';
 
 const TABS: { key: SettingsTab; label: string }[] = [
   { key: 'people', label: 'People' },
-  { key: 'global', label: 'Changes to all sites' },
-  { key: 'site', label: 'Site-specific changes' },
+  { key: 'global', label: 'Global changes' },
+  { key: 'site', label: 'Site changes' },
   { key: 'prefs', label: 'Preferences' },
 ];
 
-export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.JSX.Element {
-  /** After demoting a scoped change, remove its effect from the loaded page now. */
-  const refreshPage = () => void messageTab({ type: 'yandz:refresh-personal' });
+/** The lowercased host of a normalized urlKey, or '' if unparseable. */
+function hostOf(urlKey: string): string {
+  try {
+    return new URL(urlKey).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+export function Settings({ onOpenProfile, onClose, messageTab, onOpenChanges }: Props): React.JSX.Element {
+  /** After deactivating, remove its effect from the loaded page now. */
+  const refreshPage = () => void messageTab({ type: 'yandz:refresh-activations' });
 
   const [tab, setTab] = useState<SettingsTab>('people');
   const [following, setFollowing] = useState<PublicUser[]>([]);
   const [muted, setMuted] = useState<PublicUser[]>([]);
   const [blocked, setBlocked] = useState<PublicUser[]>([]);
-  const [globalPatches, setGlobalPatches] = useState<ScopedPatchEntry[]>([]);
-  const [sitePatches, setSitePatches] = useState<ScopedPatchEntry[]>([]);
+  const [globalVersions, setGlobalVersions] = useState<FeedItem[]>([]);
+  const [siteVersions, setSiteVersions] = useState<FeedItem[]>([]);
   const [itemsPerPage, setItemsPerPage] = useState<number>(ITEMS_PER_PAGE_DEFAULT);
   const [patchingAllowed, setPatchingAllowed] = useState(false);
   const [siteSearch, setSiteSearch] = useState('');
   const [expandedSites, setExpandedSites] = useState<Set<string>>(new Set()); // collapsed by default
-  const [openMenu, setOpenMenu] = useState<string | null>(null); // which site's kebab menu is open
   const toggleSite = (site: string) =>
     setExpandedSites((prev) => {
       const next = new Set(prev);
@@ -60,18 +69,20 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
     setMuted(m);
     setBlocked(b);
   }, []);
-  const loadGlobal = useCallback(async () => setGlobalPatches((await Api.getMyGlobalPatches()).patches), []);
-  const loadSite = useCallback(async () => setSitePatches((await Api.getMySitePatches()).patches), []);
+  const loadActivations = useCallback(async () => {
+    const list = await Api.getActivationsList();
+    setGlobalVersions(list.global);
+    setSiteVersions(list.site);
+  }, []);
 
   useEffect(() => {
     void loadPeople();
-    void loadGlobal();
-    void loadSite();
+    void loadActivations();
     void browser.storage.local.get('itemsPerPage').then((o) => {
       if (o.itemsPerPage !== undefined) setItemsPerPage(Number(o.itemsPerPage) || ITEMS_PER_PAGE_DEFAULT);
     });
     void getConsent().then((d) => setPatchingAllowed(d === 'granted'));
-  }, [loadPeople, loadGlobal, loadSite]);
+  }, [loadPeople, loadActivations]);
 
   /** Toggle global consent to patch web pages (content scripts react via storage). */
   const togglePatching = (allowed: boolean) => {
@@ -112,34 +123,30 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
     </>
   );
 
-  /** Reflect a scope change/demotion across both lists + the loaded page. */
-  const afterScope = async () => {
+  /** Deactivate a version, then refresh the lists + the loaded page. */
+  const deactivate = async (versionId: string) => {
+    await Api.deactivate(versionId).catch(() => {});
     refreshPage();
-    await Promise.all([loadGlobal(), loadSite()]);
+    await loadActivations();
   };
 
-  /** One scoped change, rendered with the SAME expandable layout as the editor's change
-   *  list (click to see details, scope dropdown). `demoteTo` is the scope the trash
-   *  reduces it to (global→site, site→page). */
-  const changeRow = (e: ScopedPatchEntry, demoteTo: PatchScope) => (
-    <ChangeItem
-      key={`${e.versionId}:${e.order}`}
-      patch={e.patch}
-      onHighlight={() => {}}
-      onDelete={async () => {
-        await Api.setPatchScope(e.versionId, e.order, demoteTo);
-        await afterScope();
-      }}
-      onScopeChange={async (scope) => {
-        await Api.setPatchScope(e.versionId, e.order, scope);
-        await afterScope();
-      }}
-    />
+  /** One active-version row: name (click → details) + a Deactivate action. */
+  const versionRow = (v: FeedItem) => (
+    <div className="card" key={v.id}>
+      <div className="row">
+        <span className="handle" style={{ flex: 1 }} title="View details" onClick={() => onOpenChanges(v)}>
+          “{v.name}” by u/{v.author.handle}
+        </span>
+        <button className="btn" onClick={() => void deactivate(v.id)}>
+          Deactivate
+        </button>
+      </div>
+    </div>
   );
 
-  // Group site-scoped changes by the site they apply to, filtered by the site search.
-  const bySite = sitePatches.reduce<Record<string, ScopedPatchEntry[]>>((acc, e) => {
-    (acc[e.site] ??= []).push(e);
+  // Group site activations by the host they apply to, filtered by the site search.
+  const bySite = siteVersions.reduce<Record<string, FeedItem[]>>((acc, v) => {
+    (acc[hostOf(v.page.urlKey)] ??= []).push(v);
     return acc;
   }, {});
   const siteQuery = siteSearch.trim().toLowerCase();
@@ -167,17 +174,17 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
         {tab === 'global' && (
           <>
             <p className="muted" style={{ marginTop: 0 }}>
-              Changes you apply to every web site. Deleting one keeps it on the site it was made on.
+              Versions you’ve activated on every site. Deactivating one stops it auto-applying.
             </p>
-            {globalPatches.map((e) => changeRow(e, 'site'))}
-            {globalPatches.length === 0 && <p className="muted">None.</p>}
+            {globalVersions.map(versionRow)}
+            {globalVersions.length === 0 && <p className="muted">None.</p>}
           </>
         )}
 
         {tab === 'site' && (
           <>
             <p className="muted" style={{ marginTop: 0 }}>
-              Changes you apply across a whole site. Deleting one keeps it on the page it was made on.
+              Versions you’ve activated across a whole site. Deactivating one stops it auto-applying there.
             </p>
             <input
               className="search-input"
@@ -204,38 +211,12 @@ export function Settings({ onOpenProfile, onClose, messageTab }: Props): React.J
                     <span className="muted" style={{ fontSize: 11 }}>
                       {entries.length}
                     </span>
-                    {/* Kebab menu — keeps "Delete all" out of sight until needed. */}
-                    <div className="kebab" onClick={(ev) => ev.stopPropagation()}>
-                      <button
-                        className="icon-btn"
-                        aria-label="More"
-                        title="More"
-                        onClick={() => setOpenMenu((m) => (m === site ? null : site))}
-                      >
-                        <MoreVertical size={14} />
-                      </button>
-                      {openMenu === site && (
-                        <div className="kebab-menu" onMouseLeave={() => setOpenMenu(null)}>
-                          <button
-                            className="kebab-item"
-                            onClick={async () => {
-                              setOpenMenu(null);
-                              await Api.demoteSitePatches(site);
-                              refreshPage();
-                              await loadSite();
-                            }}
-                          >
-                            Delete all on this site
-                          </button>
-                        </div>
-                      )}
-                    </div>
                   </div>
-                  {open && entries.map((e) => changeRow(e, 'page'))}
+                  {open && entries.map(versionRow)}
                 </div>
               );
             })}
-            {sitePatches.length === 0 ? (
+            {siteVersions.length === 0 ? (
               <p className="muted">None.</p>
             ) : (
               filteredSites.length === 0 && <p className="muted">No sites matching “{siteSearch}”.</p>

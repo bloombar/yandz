@@ -31,11 +31,11 @@ const samplePatch = (to: string) => ({
   order: 0,
 });
 
-async function makeVersion(token: string, url: string, to = 'Hi there') {
+async function makeVersion(token: string, url: string, to = 'Hi there', scope: 'page' | 'site' | 'global' = 'page') {
   const res = await request(app)
     .post('/versions')
     .set(auth(token))
-    .send({ url, name: 'v', patches: [samplePatch(to)] });
+    .send({ url, name: 'v', scope, patches: [samplePatch(to)] });
   expect(res.status).toBe(201);
   return res.body.id as string;
 }
@@ -140,7 +140,7 @@ describe('delete version', () => {
     // The author can; the version disappears from the feed and its votes/comments go.
     const del = await request(app).delete(`/versions/${id}`).set(auth(author.token));
     expect(del.body).toEqual({ deleted: true });
-    const feed = await request(app).get('/feed').query({ sort: 'latest', scope: 'all' });
+    const feed = await request(app).get('/feed').query({ sort: 'latest', scope: 'page', url });
     expect(feed.body.versions.map((v: any) => v.id)).not.toContain(id);
     const comments = await request(app).get(`/versions/${id}/comments`);
     expect(comments.body).toHaveLength(0);
@@ -168,13 +168,14 @@ describe('voting', () => {
   it('surfaces the viewer\'s existing vote in the feed (myVote)', async () => {
     const author = await makeUser('votefeedA');
     const voter = await makeUser('votefeedB');
-    const id = await makeVersion(author.token, 'https://example.com/votefeed');
+    const url = 'https://example.com/votefeed';
+    const id = await makeVersion(author.token, url);
     await request(app).post(`/versions/${id}/vote`).set(auth(voter.token)).send({ value: 1 });
 
-    const feed = await request(app).get('/feed').query({ sort: 'latest', scope: 'all' }).set(auth(voter.token));
+    const feed = await request(app).get('/feed').query({ sort: 'latest', scope: 'page', url }).set(auth(voter.token));
     expect(feed.body.versions.find((v: any) => v.id === id).myVote).toBe(1);
     // A different viewer sees no vote of their own.
-    const other = await request(app).get('/feed').query({ sort: 'latest', scope: 'all' }).set(auth(author.token));
+    const other = await request(app).get('/feed').query({ sort: 'latest', scope: 'page', url }).set(auth(author.token));
     expect(other.body.versions.find((v: any) => v.id === id).myVote).toBe(0);
   });
 });
@@ -275,37 +276,59 @@ describe('profile', () => {
   });
 });
 
-describe('feed (global + this-page)', () => {
-  it('returns versions across all pages; scope=page narrows to one page', async () => {
+describe('feed (scope tabs)', () => {
+  it('partitions versions by scope: page tab is one page, site tab is one host, global tab is everywhere', async () => {
     const u = await makeUser('feeda');
-    const id1 = await makeVersion(u.token, 'https://example.com/f1', 'a');
-    const id2 = await makeVersion(u.token, 'https://example.com/f2', 'b');
+    const pageId = await makeVersion(u.token, 'https://feedscope.test/f1', 'p', 'page');
+    const siteId = await makeVersion(u.token, 'https://feedscope.test/f2', 's', 'site');
+    const globalId = await makeVersion(u.token, 'https://feedscope-other.test/g', 'g', 'global');
 
-    const all = await request(app).get('/feed').query({ sort: 'latest', scope: 'all' });
-    expect(all.status).toBe(200);
-    const allIds = all.body.versions.map((v: any) => v.id);
-    expect(allIds).toEqual(expect.arrayContaining([id1, id2]));
-    // Each row carries the page it modifies.
-    expect(all.body.versions[0].page).toHaveProperty('urlKey');
-    expect(all.body.versions[0].page).toHaveProperty('title');
+    // Page tab: only page-scoped versions on the queried page.
+    const page = await request(app).get('/feed').query({ scope: 'page', sort: 'latest', url: 'https://feedscope.test/f1' });
+    expect(page.status).toBe(200);
+    expect(page.body.versions.map((v: any) => v.id)).toEqual([pageId]);
+    expect(page.body.currentPageKey).toBe('https://feedscope.test/f1');
+    // Each row carries the page it modifies and its scope.
+    expect(page.body.versions[0].page).toHaveProperty('urlKey');
+    expect(page.body.versions[0].scope).toBe('page');
 
-    const page = await request(app)
-      .get('/feed')
-      .query({ sort: 'latest', scope: 'page', url: 'https://example.com/f1' });
-    const pageIds = page.body.versions.map((v: any) => v.id);
-    expect(pageIds).toContain(id1);
-    expect(pageIds).not.toContain(id2);
-    expect(page.body.currentPageKey).toBe('https://example.com/f1');
+    // Site tab: site-scoped versions on the same host (any page of that host).
+    const site = await request(app).get('/feed').query({ scope: 'site', sort: 'latest', url: 'https://feedscope.test/other' });
+    expect(site.body.versions.map((v: any) => v.id)).toEqual([siteId]);
+
+    // Global tab: global-scoped versions, regardless of URL.
+    const global = await request(app).get('/feed').query({ scope: 'global', sort: 'latest' });
+    expect(global.body.versions.map((v: any) => v.id)).toContain(globalId);
+    expect(global.body.versions.map((v: any) => v.id)).not.toContain(pageId);
+  });
+
+  it('filters by following and mine', async () => {
+    const me = await makeUser('feedfilterme');
+    const followed = await makeUser('feedfilterfollowed');
+    const stranger = await makeUser('feedfilterstranger');
+    await request(app).post(`/users/${followed.id}/follow`).set(auth(me.token));
+    const mineId = await makeVersion(me.token, 'https://filter.test/a', 'm', 'global');
+    const followedId = await makeVersion(followed.token, 'https://filter.test/b', 'f', 'global');
+    const strangerId = await makeVersion(stranger.token, 'https://filter.test/c', 's', 'global');
+
+    const mine = await request(app).get('/feed').query({ scope: 'global', filter: 'mine' }).set(auth(me.token));
+    expect(mine.body.versions.map((v: any) => v.id)).toEqual([mineId]);
+
+    const following = await request(app).get('/feed').query({ scope: 'global', filter: 'following' }).set(auth(me.token));
+    const followingIds = following.body.versions.map((v: any) => v.id);
+    expect(followingIds).toContain(followedId);
+    expect(followingIds).not.toContain(mineId);
+    expect(followingIds).not.toContain(strangerId);
   });
 
   it('excludes blocked authors from the feed', async () => {
     const a = await makeUser('feedblka');
     const b = await makeUser('feedblkb');
-    const bid = await makeVersion(b.token, 'https://example.com/fb', 'byB');
-    let feed = await request(app).get('/feed').query({ sort: 'latest', scope: 'all' }).set(auth(a.token));
+    const bid = await makeVersion(b.token, 'https://blk.test/fb', 'byB', 'global');
+    let feed = await request(app).get('/feed').query({ scope: 'global', sort: 'latest' }).set(auth(a.token));
     expect(feed.body.versions.map((v: any) => v.id)).toContain(bid);
     await request(app).post(`/users/${b.id}/block`).set(auth(a.token));
-    feed = await request(app).get('/feed').query({ sort: 'latest', scope: 'all' }).set(auth(a.token));
+    feed = await request(app).get('/feed').query({ scope: 'global', sort: 'latest' }).set(auth(a.token));
     expect(feed.body.versions.map((v: any) => v.id)).not.toContain(bid);
   });
 });
@@ -314,37 +337,24 @@ describe('bookmarks', () => {
   it('toggles a bookmark and lists it in the bookmarks feed', async () => {
     const author = await makeUser('bmauthor');
     const me = await makeUser('bmme');
-    const id = await makeVersion(author.token, 'https://example.com/bm', 'x');
+    const url = 'https://example.com/bm';
+    const id = await makeVersion(author.token, url, 'x');
 
     const on = await request(app).post(`/versions/${id}/bookmark`).set(auth(me.token));
     expect(on.body).toEqual({ bookmarked: true });
 
-    let marks = await request(app).get('/feed/bookmarks').query({ scope: 'all' }).set(auth(me.token));
+    let marks = await request(app).get('/feed/bookmarks').query({ scope: 'page', url }).set(auth(me.token));
     expect(marks.body.versions.map((v: any) => v.id)).toContain(id);
     expect(marks.body.versions.find((v: any) => v.id === id).bookmarked).toBe(true);
 
     await request(app).delete(`/versions/${id}/bookmark`).set(auth(me.token));
-    marks = await request(app).get('/feed/bookmarks').query({ scope: 'all' }).set(auth(me.token));
+    marks = await request(app).get('/feed/bookmarks').query({ scope: 'page', url }).set(auth(me.token));
     expect(marks.body.versions.map((v: any) => v.id)).not.toContain(id);
   });
 
   it('requires auth for the bookmarks feed', async () => {
-    const r = await request(app).get('/feed/bookmarks').query({ scope: 'all' });
+    const r = await request(app).get('/feed/bookmarks').query({ scope: 'global' });
     expect(r.status).toBe(401);
-  });
-});
-
-describe('feed mine=1 (By you)', () => {
-  it('returns only the viewer\'s own versions', async () => {
-    const me = await makeUser('byme');
-    const other = await makeUser('byother');
-    const mineId = await makeVersion(me.token, 'https://example.com/byme', 'mine');
-    const otherId = await makeVersion(other.token, 'https://example.com/byme', 'theirs');
-
-    const feed = await request(app).get('/feed').query({ mine: '1', scope: 'all' }).set(auth(me.token));
-    const ids = feed.body.versions.map((v: any) => v.id);
-    expect(ids).toContain(mineId);
-    expect(ids).not.toContain(otherId);
   });
 });
 

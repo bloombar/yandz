@@ -58,10 +58,6 @@ const patchSchema = new Schema(
     target: { type: elementTargetSchema, required: true },
     payload: { type: Schema.Types.Mixed, required: true },
     order: { type: Number, required: true },
-    // Personal application scope (see shared PatchScope): 'page' applies only on this
-    // version's page; 'site'/'global' also auto-apply for the author across the host /
-    // all sites.
-    scope: { type: String, enum: ['page', 'site', 'global'], default: 'page' },
   },
   { _id: false },
 );
@@ -74,6 +70,12 @@ const versionSchema = new Schema(
     patches: { type: [patchSchema], default: [] },
     parentVersionId: { type: Types.ObjectId, ref: 'Version', default: null },
     rootVersionId: { type: Types.ObjectId, ref: 'Version', default: null },
+    // Application scope, set by the creator. 'page' applies only on this version's page;
+    // 'site' across the whole host; 'global' on every site. `host` is the denormalized
+    // host of the version's page (hostOf(page.urlKey)), so site-scoped feeds/activations
+    // resolve in one indexed query instead of fanning out over every Page on the host.
+    scope: { type: String, enum: ['page', 'site', 'global'], default: 'page', index: true },
+    host: { type: String, default: '', index: true },
     urlMatch: {
       mode: { type: String, enum: ['exact', 'path', 'pattern'], default: 'exact' },
       value: String,
@@ -86,6 +88,9 @@ const versionSchema = new Schema(
   },
   { timestamps: true },
 );
+// Tab feeds rank by scope: the global tab scans {scope}, the site tab {scope,host}.
+versionSchema.index({ scope: 1, hotScore: -1 });
+versionSchema.index({ scope: 1, host: 1, hotScore: -1 });
 export const Version = model('Version', versionSchema);
 
 // --- Vote -----------------------------------------------------------------
@@ -141,6 +146,27 @@ const bookmarkSchema = new Schema(
 );
 bookmarkSchema.index({ userId: 1, versionId: 1 }, { unique: true });
 export const Bookmark = model('Bookmark', bookmarkSchema);
+
+// --- Activation (a user's opted-in site/global version) -------------------
+// A persisted opt-in: a viewer activates a public site/global version so it
+// auto-re-applies on every matching page until deactivated. `scope`/`host` are
+// denormalized from the Version so the unique key enforces "one active per scope
+// instance" (one global per user; one site per user per host) and replacement is a
+// plain upsert. Page-scoped versions are never activated (they live in session state).
+const activationSchema = new Schema(
+  {
+    userId: { type: Types.ObjectId, ref: 'User', required: true },
+    versionId: { type: Types.ObjectId, ref: 'Version', required: true },
+    scope: { type: String, enum: ['site', 'global'], required: true },
+    host: { type: String, default: '' }, // the site host for scope='site'; '' for global
+  },
+  { timestamps: true },
+);
+// One active version per (user, scope, host): activating a new one replaces the old.
+activationSchema.index({ userId: 1, scope: 1, host: 1 }, { unique: true });
+// A version can't be activated twice by the same user.
+activationSchema.index({ userId: 1, versionId: 1 }, { unique: true });
+export const Activation = model('Activation', activationSchema);
 
 // --- Push subscriptions ---------------------------------------------------
 const pushSubSchema = new Schema(

@@ -17,6 +17,7 @@ async function makeUser(handle: string) {
   return res.body.token as string;
 }
 
+// Global-scoped so search spans pages within the one (global) tab.
 async function makeVersion(token: string, url: string, name: string, title: string) {
   const res = await request(app)
     .post('/versions')
@@ -25,6 +26,7 @@ async function makeVersion(token: string, url: string, name: string, title: stri
       url,
       name,
       title,
+      scope: 'global',
       patches: [{ op: 'textReplace', target: { cssSelector: 'h1' }, payload: { from: 'Hello', to: 'x' }, order: 0 }],
     });
   expect(res.status).toBe(201);
@@ -32,6 +34,7 @@ async function makeVersion(token: string, url: string, name: string, title: stri
 }
 
 const names = (body: { versions: { name: string }[] }) => body.versions.map((v) => v.name).sort();
+const search = (q?: string) => request(app).get('/feed').query(q === undefined ? { scope: 'global' } : { scope: 'global', q });
 
 describe('feed search', () => {
   it('matches by version title, page title, or handle (u/ optional)', async () => {
@@ -41,15 +44,15 @@ describe('feed search', () => {
     await makeVersion(bob, 'https://news.test/home', 'Bigger Fonts', 'Daily News');
 
     // By version title.
-    expect(names((await request(app).get('/feed').query({ q: 'dark' })).body)).toEqual(['Dark Mode']);
+    expect(names((await search('dark')).body)).toEqual(['Dark Mode']);
     // By page title.
-    expect(names((await request(app).get('/feed').query({ q: 'widget' })).body)).toEqual(['Dark Mode']);
+    expect(names((await search('widget')).body)).toEqual(['Dark Mode']);
     // By handle, both forms.
-    expect(names((await request(app).get('/feed').query({ q: 'u/searchbob' })).body)).toEqual(['Bigger Fonts']);
-    expect(names((await request(app).get('/feed').query({ q: 'searchbob' })).body)).toEqual(['Bigger Fonts']);
+    expect(names((await search('u/searchbob')).body)).toEqual(['Bigger Fonts']);
+    expect(names((await search('searchbob')).body)).toEqual(['Bigger Fonts']);
     // No matches.
-    expect((await request(app).get('/feed').query({ q: 'zzz-nothing' })).body.versions).toHaveLength(0);
+    expect((await search('zzz-nothing')).body.versions).toHaveLength(0);
     // No query → both returned.
-    expect(names((await request(app).get('/feed')).body).length).toBeGreaterThanOrEqual(2);
+    expect(names((await search()).body).length).toBeGreaterThanOrEqual(2);
   });
 });

@@ -1,140 +1,115 @@
 /**
- * Personal-patch routes ("/me"). A patch's `scope` lets its author apply it beyond
- * the page it was made on — across the whole host ('site') or every site ('global') —
- * for THAT user only. These routes serve the content script (which patches to
- * auto-apply on a given URL) and the account-settings management tabs (list + demote).
+ * Activation routes ("/me/activations"). A viewer opts in to a public site- or
+ * global-scoped version so it auto-re-applies on every matching page until they
+ * deactivate it. At most one version is active per scope instance (one global per
+ * user; one site per user per host) — activating a new one replaces the old.
  *
- * All handlers require auth and operate only on the caller's own versions.
+ * These routes serve the content script (which versions to auto-apply on a URL) and
+ * the account-settings management lists. Page-scoped versions are never activated
+ * here — they live in per-page session state on the client.
+ *
+ * All handlers require auth and operate only on the caller's own activations.
  */
 import { Router } from 'express';
 import { z } from 'zod';
 import { Types } from 'mongoose';
-import { Version } from '../models.js';
+import { Version, Activation } from '../models.js';
 import { requireAuth } from '../lib/auth.js';
-import { hostOf, pageKey } from '../services/url.js';
-import { sanitizePatchList } from '../services/sanitize.js';
-import type { AnyPatch, PatchScope } from '@yandz/shared';
+import { hostOf } from '../services/url.js';
+import { serializeVersions, type RawVersion } from '../services/serialize.js';
 
 export const meRouter = Router();
 
-type LeanVersion = { _id: Types.ObjectId; name: string; patches: AnyPatch[]; pageId?: { urlKey?: string } | null };
-
-/** Plain patch objects (for sanitize/store), stripped of Mongoose subdoc machinery. */
-function toPlain(patches: AnyPatch[]): AnyPatch[] {
-  return patches.map((p) => ({ op: p.op, target: p.target, payload: p.payload, order: p.order, scope: p.scope }) as AnyPatch);
+interface LeanActivation {
+  _id: Types.ObjectId;
+  versionId: Types.ObjectId;
+  scope: 'site' | 'global';
+  host: string;
 }
 
-/** The caller's versions that contain at least one patch of the given scope(s), with page urlKey. */
-async function ownedVersionsWithScope(userId: string, scopes: PatchScope[]): Promise<LeanVersion[]> {
-  return Version.find({ authorId: userId, 'patches.scope': { $in: scopes } })
-    .populate('pageId', 'urlKey')
-    .lean<LeanVersion[]>();
+/**
+ * Load the caller's activations, resolve their versions, and serialize them. Drops
+ * (and deletes) any activation whose version no longer exists — a self-healing pass
+ * so stale opt-ins from deleted versions don't linger.
+ */
+async function resolveActivations(userId: string, acts: LeanActivation[]) {
+  const versionIds = acts.map((a) => a.versionId);
+  const versions = await Version.find({ _id: { $in: versionIds } }).lean();
+  const liveIds = new Set(versions.map((v) => String(v._id)));
+  const orphans = acts.filter((a) => !liveIds.has(String(a.versionId)));
+  if (orphans.length) await Activation.deleteMany({ _id: { $in: orphans.map((o) => o._id) } });
+  return serializeVersions(versions as unknown as RawVersion[], userId);
 }
 
-/** Flatten matching patches into management entries (one per patch). */
-function entriesForScope(versions: LeanVersion[], scope: PatchScope) {
-  const out: { versionId: string; order: number; versionName: string; site: string; patch: AnyPatch }[] = [];
-  for (const v of versions) {
-    const site = hostOf(v.pageId?.urlKey ?? '');
-    for (const p of v.patches) {
-      if (p.scope === scope) out.push({ versionId: String(v._id), order: p.order, versionName: v.name, site, patch: p });
-    }
-  }
-  return out;
-}
-
-// GET /me/patches?url=<currentUrl> — patches to auto-apply on this URL for the caller:
-// every 'global' patch, plus 'site' patches whose version's host matches. Excludes the
-// current page's own patches (those already arrive via /pages).
-meRouter.get('/patches', requireAuth, async (req, res) => {
+// GET /me/activations?url=<currentUrl> — the caller's ACTIVE versions relevant to this
+// URL: every global activation, plus the site activation whose host matches. Returns
+// fully serialized versions (the content script needs the patch sets to apply). NOT
+// block-filtered: a deliberate opt-in overrides discovery blocks.
+meRouter.get('/activations', requireAuth, async (req, res) => {
   const url = typeof req.query.url === 'string' ? req.query.url : '';
-  if (!url) {
-    res.status(400).json({ error: 'missing url' });
-    return;
-  }
-  const curHost = hostOf(url);
-  const curKey = pageKey(url);
-  const versions = await ownedVersionsWithScope(req.userId!, ['site', 'global']);
-  const patches: AnyPatch[] = [];
-  for (const v of versions) {
-    const vKey = v.pageId?.urlKey ?? '';
-    if (vKey && vKey === curKey) continue; // own page → already delivered via /pages
-    const vHost = hostOf(vKey);
-    for (const p of v.patches) {
-      if (p.scope === 'global' || (p.scope === 'site' && vHost && vHost === curHost)) patches.push(p);
-    }
-  }
-  res.json({ patches });
+  const host = hostOf(url);
+  const acts = await Activation.find({
+    userId: new Types.ObjectId(req.userId!),
+    $or: [{ scope: 'global' }, { scope: 'site', host }],
+  }).lean<LeanActivation[]>();
+  res.json({ versions: await resolveActivations(req.userId!, acts) });
 });
 
-// GET /me/patches/global and /me/patches/site — management lists for the settings tabs.
-meRouter.get('/patches/global', requireAuth, async (req, res) => {
-  res.json({ patches: entriesForScope(await ownedVersionsWithScope(req.userId!, ['global']), 'global') });
-});
-meRouter.get('/patches/site', requireAuth, async (req, res) => {
-  res.json({ patches: entriesForScope(await ownedVersionsWithScope(req.userId!, ['site']), 'site') });
+// GET /me/activations/list — all of the caller's active versions, split by scope, for
+// the account-settings management lists ("Active on all sites" / "Active on this site").
+meRouter.get('/activations/list', requireAuth, async (req, res) => {
+  const acts = await Activation.find({ userId: new Types.ObjectId(req.userId!) }).lean<LeanActivation[]>();
+  const versions = await resolveActivations(req.userId!, acts);
+  res.json({
+    site: versions.filter((v) => v.scope === 'site'),
+    global: versions.filter((v) => v.scope === 'global'),
+  });
 });
 
-// PATCH /me/patches/scope { versionId, order, scope } — change one patch's scope
-// (drives the single demotions global→site and site→page). Author-only.
-meRouter.patch('/patches/scope', requireAuth, async (req, res) => {
-  const body = z
-    .object({ versionId: z.string(), order: z.number(), scope: z.enum(['page', 'site', 'global']) })
-    .safeParse(req.body);
+// POST /me/activations { versionId } — opt in to a site/global version. Upserts on the
+// (user, scope, host) slot, so activating a new version replaces whatever was active
+// there; the replaced version's id is returned so the client can flip its toggle off.
+meRouter.post('/activations', requireAuth, async (req, res) => {
+  const body = z.object({ versionId: z.string() }).safeParse(req.body);
   if (!body.success || !Types.ObjectId.isValid(body.data.versionId)) {
     res.status(400).json({ error: 'invalid input' });
     return;
   }
-  const version = await Version.findById(body.data.versionId).lean<LeanVersion & { authorId: Types.ObjectId }>();
+  const version = await Version.findById(body.data.versionId).select('scope host').lean();
   if (!version) {
     res.status(404).json({ error: 'not found' });
     return;
   }
-  if (String(version.authorId) !== req.userId) {
-    res.status(403).json({ error: 'forbidden' });
+  if (version.scope !== 'site' && version.scope !== 'global') {
+    res.status(400).json({ error: 'only site or global versions can be activated' });
     return;
   }
-  const plain = toPlain(version.patches);
-  const idx = plain.findIndex((p) => p.order === body.data.order);
-  if (idx < 0) {
-    res.status(404).json({ error: 'patch not found' });
-    return;
-  }
-  plain[idx]!.scope = body.data.scope;
-  const clean = sanitizePatchList(plain);
-  if (!clean.ok || !clean.patches) {
-    res.status(422).json({ error: 'patch rejected', reason: clean.reason });
-    return;
-  }
-  await Version.updateOne({ _id: version._id }, { $set: { patches: clean.patches } });
-  res.json({ ok: true });
+  const scope = version.scope;
+  const host = scope === 'site' ? version.host ?? '' : '';
+  const userId = new Types.ObjectId(req.userId!);
+
+  // Whatever currently occupies this (scope, host) slot gets replaced.
+  const existing = await Activation.findOne({ userId, scope, host }).lean<LeanActivation | null>();
+  const replacedVersionId =
+    existing && String(existing.versionId) !== body.data.versionId ? String(existing.versionId) : null;
+
+  await Activation.findOneAndUpdate(
+    { userId, scope, host },
+    { $set: { versionId: new Types.ObjectId(body.data.versionId) } },
+    { upsert: true, new: true },
+  );
+  res.json({ activated: true, scope, host, replacedVersionId });
 });
 
-// POST /me/patches/demote-site { host } — bulk demote: every 'site' patch on the
-// caller's versions whose host matches becomes 'page'. Author-only by construction.
-meRouter.post('/patches/demote-site', requireAuth, async (req, res) => {
-  const body = z.object({ host: z.string().min(1) }).safeParse(req.body);
-  if (!body.success) {
-    res.status(400).json({ error: 'invalid input' });
+// DELETE /me/activations/:versionId — deactivate (permanently, until re-activated).
+meRouter.delete('/activations/:versionId', requireAuth, async (req, res) => {
+  if (!Types.ObjectId.isValid(req.params.versionId)) {
+    res.status(400).json({ error: 'bad id' });
     return;
   }
-  const host = body.data.host.toLowerCase();
-  const versions = await ownedVersionsWithScope(req.userId!, ['site']);
-  let demoted = 0;
-  for (const v of versions) {
-    if (hostOf(v.pageId?.urlKey ?? '') !== host) continue;
-    const plain = toPlain(v.patches);
-    let changed = false;
-    for (const p of plain) {
-      if (p.scope === 'site') {
-        p.scope = 'page';
-        changed = true;
-        demoted++;
-      }
-    }
-    if (!changed) continue;
-    const clean = sanitizePatchList(plain);
-    if (clean.ok && clean.patches) await Version.updateOne({ _id: v._id }, { $set: { patches: clean.patches } });
-  }
-  res.json({ ok: true, demoted });
+  await Activation.deleteOne({
+    userId: new Types.ObjectId(req.userId!),
+    versionId: new Types.ObjectId(req.params.versionId),
+  });
+  res.json({ deactivated: true });
 });

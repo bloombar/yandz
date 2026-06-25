@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "seed": "tsx src/seed/seed.ts",
+    "migrate:scope": "tsx src/seed/migrate-scope.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:live": "vitest run --config vitest.live.config.ts"

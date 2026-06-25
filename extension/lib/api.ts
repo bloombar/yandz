@@ -4,7 +4,7 @@
  * request. The base URL comes from the build-time env (dev server vs prod).
  */
 import { browser } from 'wxt/browser';
-import type { AnyPatch, PatchScope } from '@yandz/shared';
+import type { AnyPatch, VersionScope } from '@yandz/shared';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:4000';
 
@@ -23,6 +23,8 @@ export interface VersionSummary {
   name: string;
   author: PublicUser;
   patches: AnyPatch[];
+  /** The version's application scope (page / site / global). */
+  scope: VersionScope;
   parentVersionId: string | null;
   up: number;
   down: number;
@@ -51,18 +53,12 @@ export interface FeedResult {
   hasMore: boolean;
 }
 
+/** Sort within a tab: personalized "Your feed" or strict reverse-chronological. */
 export type FeedSort = 'foryou' | 'latest';
-export type FeedScope = 'all' | 'page';
-
-/** One managed personal scoped patch (the settings tabs): a change broadened beyond its page. */
-export interface ScopedPatchEntry {
-  versionId: string;
-  order: number;
-  versionName: string;
-  /** Host of the page the version was originally made on. */
-  site: string;
-  patch: AnyPatch;
-}
+/** The scope tabs: This page / This site / Global. */
+export type FeedScope = 'page' | 'site' | 'global';
+/** The in-tab filter chips. 'bookmarked' is served by the bookmarks endpoint. */
+export type FeedFilter = 'all' | 'following' | 'mine' | 'bookmarked';
 
 /** Read the stored auth token (session-scoped). */
 export async function getToken(): Promise<string | null> {
@@ -156,38 +152,46 @@ export const Api = {
         (title ? `&title=${encodeURIComponent(title)}` : ''),
     ),
 
-  // Global (or this-page) feed. `url` is the active tab's URL for scope/comparison;
-  // `q` is an optional free-text search; `offset`/`limit` paginate (infinite scroll).
-  getFeed: (sort: FeedSort, scope: FeedScope, url?: string, q?: string, offset?: number, limit?: number) =>
-    api<FeedResult>(`/feed?sort=${sort}&scope=${scope}&url=${encodeURIComponent(url ?? '')}${pageQuery(q, offset, limit)}`),
+  // A scope tab's feed (page/site/global), filtered by all|following|mine and sorted by
+  // foryou|latest. `url` is the active tab's URL (resolves the page/site context); `q` is
+  // an optional free-text search; `offset`/`limit` paginate (infinite scroll).
+  getFeed: (
+    scope: FeedScope,
+    filter: 'all' | 'following' | 'mine',
+    sort: FeedSort,
+    url?: string,
+    q?: string,
+    offset?: number,
+    limit?: number,
+  ) =>
+    api<FeedResult>(
+      `/feed?scope=${scope}&filter=${filter}&sort=${sort}&url=${encodeURIComponent(url ?? '')}${pageQuery(q, offset, limit)}`,
+    ),
 
+  // The viewer's bookmarked versions within a scope tab (the "Bookmarked" filter chip).
   getBookmarksFeed: (scope: FeedScope, url?: string, q?: string, offset?: number, limit?: number) =>
     api<FeedResult>(`/feed/bookmarks?scope=${scope}&url=${encodeURIComponent(url ?? '')}${pageQuery(q, offset, limit)}`),
-
-  // The viewer's own versions (newest first) — the "By you" tab.
-  getMyFeed: (scope: FeedScope, url?: string, q?: string, offset?: number, limit?: number) =>
-    api<FeedResult>(`/feed?mine=1&scope=${scope}&url=${encodeURIComponent(url ?? '')}${pageQuery(q, offset, limit)}`),
 
   toggleBookmark: (id: string, on: boolean) =>
     api<{ bookmarked: boolean }>(`/versions/${id}/bookmark`, { method: on ? 'POST' : 'DELETE' }),
 
   // A single version (used to preload a base when starting an attributed derivative).
   getVersion: (id: string) =>
-    api<{ id: string; name: string; authorId: string; patches: AnyPatch[]; parentVersionId: string | null }>(
+    api<{ id: string; name: string; authorId: string; patches: AnyPatch[]; scope: VersionScope; parentVersionId: string | null }>(
       `/versions/${id}`,
     ),
 
-  createVersion: (input: { url: string; title?: string; name?: string; patches: AnyPatch[] }) =>
+  createVersion: (input: { url: string; title?: string; name?: string; patches: AnyPatch[]; scope?: VersionScope }) =>
     api<{ id: string; name: string }>('/versions', { method: 'POST', body: JSON.stringify(input) }),
 
-  forkVersion: (id: string, input: { url: string; title?: string; name?: string; patches: AnyPatch[] }) =>
+  forkVersion: (id: string, input: { url: string; title?: string; name?: string; patches: AnyPatch[]; scope?: VersionScope }) =>
     api<{ id: string; name: string; parentVersionId: string }>(`/versions/${id}/fork`, {
       method: 'POST',
       body: JSON.stringify(input),
     }),
 
   // Replace an existing version's patch set (used by debounced auto-save).
-  updateVersion: (id: string, input: { name?: string; patches: AnyPatch[] }) =>
+  updateVersion: (id: string, input: { name?: string; patches: AnyPatch[]; scope?: VersionScope }) =>
     api<{ id: string }>(`/versions/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
 
   // Delete a version the viewer authored.
@@ -231,19 +235,21 @@ export const Api = {
   subscribePush: (subscription: PushSubscriptionJSON) =>
     api('/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription }) }),
 
-  // --- Personal scoped patches (/me) ---
-  // The current user's patches to auto-apply on this URL (site/global scope).
-  getMyPatches: (url: string) => api<{ patches: AnyPatch[] }>(`/me/patches?url=${encodeURIComponent(url)}`),
-  // Management lists for the settings tabs.
-  getMyGlobalPatches: () => api<{ patches: ScopedPatchEntry[] }>('/me/patches/global'),
-  getMySitePatches: () => api<{ patches: ScopedPatchEntry[] }>('/me/patches/site'),
-  // Change one patch's scope (single demotions: global→site, site→page).
-  setPatchScope: (versionId: string, order: number, scope: PatchScope) =>
-    api<{ ok: boolean }>('/me/patches/scope', { method: 'PATCH', body: JSON.stringify({ versionId, order, scope }) }),
-  // Bulk demote every 'site' patch on a host to 'page'.
-  demoteSitePatches: (host: string) =>
-    api<{ ok: boolean; demoted: number }>('/me/patches/demote-site', {
+  // --- Activations (/me/activations): the viewer's opted-in site/global versions ---
+  // Active versions relevant to this URL (every global + the matching-host site), to
+  // auto-apply on load. Returns full feed items so the content script has the patches.
+  getActivations: (url: string) =>
+    api<{ versions: FeedItem[] }>(`/me/activations?url=${encodeURIComponent(url)}`),
+  // The viewer's active versions split by scope, for the account-settings lists.
+  getActivationsList: () => api<{ site: FeedItem[]; global: FeedItem[] }>('/me/activations/list'),
+  // Opt in to a site/global version. Returns the version it replaced in that scope
+  // slot (or null), so the caller can flip the replaced toggle off.
+  activate: (versionId: string) =>
+    api<{ activated: true; scope: VersionScope; host: string; replacedVersionId: string | null }>('/me/activations', {
       method: 'POST',
-      body: JSON.stringify({ host }),
+      body: JSON.stringify({ versionId }),
     }),
+  // Deactivate (permanently, until re-activated).
+  deactivate: (versionId: string) =>
+    api<{ deactivated: true }>(`/me/activations/${versionId}`, { method: 'DELETE' }),
 };

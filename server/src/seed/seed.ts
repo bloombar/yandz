@@ -13,8 +13,9 @@
 import bcrypt from 'bcryptjs';
 import { config } from '../config.js';
 import { connectDb, disconnectDb } from '../db.js';
-import { User, Page, Version, Vote, Comment, Follow, Mute, Block, PushSub } from '../models.js';
-import { pageKey } from '../services/url.js';
+import { User, Page, Version, Vote, Comment, Follow, Mute, Block, PushSub, Activation } from '../models.js';
+import { pageKey, hostOf } from '../services/url.js';
+import type { VersionScope } from '@yandz/shared';
 import { sanitizePatchList } from '../services/sanitize.js';
 import { recomputeVersionScore } from '../services/scoring.js';
 import { USERS, PAGES, FOLLOWS, buildPatches } from './mock-data.js';
@@ -35,6 +36,7 @@ async function wipe(): Promise<void> {
     Mute.deleteMany({}),
     Block.deleteMany({}),
     PushSub.deleteMany({}),
+    Activation.deleteMany({}),
   ]);
 }
 
@@ -65,17 +67,27 @@ async function seed(): Promise<void> {
   );
 
   // --- Versions: each user modifies each page (25 total) -----------------
+  // Track each version's scope/host so we can seed a couple of opt-in activations
+  // and so the three scope feeds (This page / This site / Global) are all populated.
   const versionIds: Types.ObjectId[] = [];
+  const seededVersions: { id: Types.ObjectId; authorIdx: number; scope: VersionScope; host: string }[] = [];
   for (let u = 0; u < users.length; u++) {
     for (let p = 0; p < pages.length; p++) {
       const clean = sanitizePatchList(buildPatches(u, p));
       if (!clean.ok || !clean.patches) throw new Error(`seed patch invalid: ${clean.reason}`);
+
+      // Vary scope so every tab has content: of each 5, ~3 page, 1 site, 1 global.
+      const slot = (u + p) % 5;
+      const scope: VersionScope = slot === 4 ? 'global' : slot === 2 ? 'site' : 'page';
+      const host = hostOf(pages[p]!.urlKey);
 
       const version = await Version.create({
         pageId: pages[p]!._id,
         authorId: users[u]!._id,
         name: `${USERS[u]!.handle}'s take on ${PAGES[p]!.title}`,
         patches: clean.patches,
+        scope,
+        host,
         urlMatch: { mode: 'exact', value: pages[p]!.urlKey },
       });
       version.rootVersionId = version._id as unknown as typeof version.rootVersionId;
@@ -86,6 +98,7 @@ async function seed(): Promise<void> {
       await Version.updateOne({ _id: version._id }, { $set: { createdAt } }, { timestamps: false });
 
       versionIds.push(version._id);
+      seededVersions.push({ id: version._id, authorIdx: u, scope, host });
     }
   }
   // Set accurate per-page version counts.
@@ -94,6 +107,23 @@ async function seed(): Promise<void> {
     await Page.updateOne({ _id: page._id }, { $set: { versionCount: count } });
   }
   console.log(`  ${versionIds.length} versions across ${pages.length} pages`);
+
+  // --- Activations: opt ada (user 0) into a global + a site version ------
+  // Gives the "active versions" settings lists and the applied-versions bar
+  // something to show out of the box. Picks versions ada didn't author.
+  const adaId = users[0]!._id;
+  const globalPick = seededVersions.find((v) => v.scope === 'global' && v.authorIdx !== 0);
+  const sitePick = seededVersions.find((v) => v.scope === 'site' && v.authorIdx !== 0);
+  let activationCount = 0;
+  if (globalPick) {
+    await Activation.create({ userId: adaId, versionId: globalPick.id, scope: 'global', host: '' });
+    activationCount++;
+  }
+  if (sitePick) {
+    await Activation.create({ userId: adaId, versionId: sitePick.id, scope: 'site', host: sitePick.host });
+    activationCount++;
+  }
+  console.log(`  ${activationCount} activations (for u/${USERS[0]!.handle})`);
 
   // --- Follows -----------------------------------------------------------
   let followCount = 0;
