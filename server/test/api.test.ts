@@ -302,6 +302,21 @@ describe('feed (scope tabs)', () => {
     expect(global.body.versions.map((v: any) => v.id)).not.toContain(pageId);
   });
 
+  it('the "latest" tab returns page-scoped versions across all pages (not just one)', async () => {
+    const u = await makeUser('feedlatest');
+    const p1 = await makeVersion(u.token, 'https://latest.test/a', 'la', 'page');
+    const p2 = await makeVersion(u.token, 'https://latest.test/b', 'lb', 'page');
+    const siteId = await makeVersion(u.token, 'https://latest.test/c', 'lc', 'site');
+
+    const latest = await request(app).get('/feed').query({ scope: 'latest', filter: 'all', sort: 'foryou' });
+    expect(latest.status).toBe(200);
+    const ids = latest.body.versions.map((v: any) => v.id);
+    // Both page versions appear regardless of page; the site version does not.
+    expect(ids).toEqual(expect.arrayContaining([p1, p2]));
+    expect(ids).not.toContain(siteId);
+    expect(latest.body.versions.every((v: any) => v.scope === 'page')).toBe(true);
+  });
+
   it('filters by following and mine', async () => {
     const me = await makeUser('feedfilterme');
     const followed = await makeUser('feedfilterfollowed');

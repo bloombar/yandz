@@ -24,9 +24,14 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .applied-bar { display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; border-bottom: 1px solid #8883; background: #4c9ffe11; }
 .applied-bar-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
 .applied-row { display: flex; align-items: center; gap: 8px; }
+/* A paused (toggled-off) activation stays in the bar but is dimmed. */
+.applied-row.off { opacity: 0.5; }
 .applied-name { flex: 1; cursor: pointer; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .applied-name:hover { text-decoration: underline; }
 .applied-toggle { color: #4c9ffe; }
+.applied-row.off .applied-toggle { color: #8889; }
+.applied-remove { color: #8889; }
+.applied-remove:hover { color: #e74c3c; }
 /* Scope chip (Page / Site / Global). */
 .scope-chip { flex-shrink: 0; font: 10px system-ui; font-weight: 600; padding: 1px 6px; border-radius: 999px; color: #fff; }
 .scope-chip.scope-page { background: #4c9ffe; }
@@ -82,10 +87,18 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 
 /* Compact, row-like feed item: bottom border only, no card chrome. Stacked lines:
    [title ........ actions] / page-ref / [author/date ........ votes]. */
-.version-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-bottom: 1px solid #8883; cursor: pointer; }
+/* A list item is a horizontal flex: the large vote rail (left) + the stacked body. */
+.version-row { display: flex; flex-direction: row; align-items: stretch; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #8883; cursor: pointer; }
 .version-row:hover { background: #8881; }
 /* The currently-applied version is highlighted in the list. */
 .version-row.active { background: #4c9ffe22; box-shadow: inset 3px 0 0 #4c9ffe; }
+/* Vote rail: up · net · down, stacked vertically and enlarged, left of the item. */
+.vote-rail { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px; flex-shrink: 0; width: 44px; }
+.vote-btn { display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: inherit; padding: 2px; border-radius: 8px; cursor: pointer; line-height: 1; }
+.vote-btn:hover { background: #8881; }
+.vote-count { font-size: 18px; font-weight: 700; line-height: 1.1; }
+/* The body holds the original three stacked lines and takes the remaining width. */
+.vr-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .vr-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .vr-line > .page-link, .vr-line > .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 /* Page title — unstyled plain text (clickable to apply, but not link-like). */

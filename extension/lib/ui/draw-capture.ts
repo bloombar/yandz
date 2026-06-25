@@ -9,6 +9,7 @@
  * as the page shifts). Strokes auto-emit after a debounce (and on stop).
  */
 import type { DrawingStroke } from '@yandz/shared';
+import { strokeToClient } from './stroke-geometry.js';
 
 export interface DrawOptions {
   color?: string;
@@ -128,10 +129,44 @@ export function startDrawing(opts: DrawOptions): () => void {
     if (e.key === 'Escape') stop();
   };
 
+  /** Repaint committed strokes from their stored percentages relative to the target's
+   *  CURRENT position, so the live drawing tracks the element as the page scrolls or
+   *  reflows — matching how the saved overlay behaves (the bug was that this fixed
+   *  canvas kept its strokes at their original viewport coordinates). */
+  function redraw(): void {
+    cx.clearRect(0, 0, layer.width, layer.height);
+    if (!target || strokes.length === 0) return;
+    const r = target.getBoundingClientRect();
+    cx.lineWidth = Math.max(2, sizePct * r.width);
+    for (const s of strokes) {
+      const clientPts = strokeToClient(s.points, r);
+      cx.beginPath();
+      clientPts.forEach(([x, y], i) => (i === 0 ? cx.moveTo(x, y) : cx.lineTo(x, y)));
+      cx.stroke();
+    }
+  }
+
+  // Track scroll/resize so committed strokes stay anchored to the target. Skipped while
+  // a stroke is in progress (you're drawing, not scrolling). Mirrors the overlay renderer.
+  const reflow = () => {
+    if (drawing) return;
+    if (layer.width !== window.innerWidth || layer.height !== window.innerHeight) {
+      layer.width = window.innerWidth;
+      layer.height = window.innerHeight;
+      // Resizing a canvas resets its 2D context state — restore stroke styling.
+      cx.strokeStyle = color;
+      cx.lineCap = 'round';
+      cx.lineJoin = 'round';
+    }
+    redraw();
+  };
+
   layer.addEventListener('pointerdown', down);
   layer.addEventListener('pointermove', move);
   layer.addEventListener('pointerup', up);
   document.addEventListener('keydown', key, true);
+  window.addEventListener('scroll', reflow, { passive: true });
+  window.addEventListener('resize', reflow, { passive: true });
 
   function stop(): void {
     if (timer) clearTimeout(timer);
@@ -139,6 +174,8 @@ export function startDrawing(opts: DrawOptions): () => void {
     layer.removeEventListener('pointermove', move);
     layer.removeEventListener('pointerup', up);
     document.removeEventListener('keydown', key, true);
+    window.removeEventListener('scroll', reflow);
+    window.removeEventListener('resize', reflow);
     layer.remove();
     hilite.remove();
     if (strokes.length && target) opts.onStrokes([...strokes], target); // final save

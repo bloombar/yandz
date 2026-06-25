@@ -32,6 +32,19 @@ async function setConsent(sw: Worker, value: 'granted' | 'declined') {
     await (globalThis as any).chrome.storage.local.set({ 'yandz:consent': v });
   }, value);
 }
+async function setToken(sw: Worker, token: string) {
+  await sw.evaluate(async (t) => {
+    await (globalThis as any).chrome.storage.session.set({ token: t });
+  }, token);
+}
+async function activate(token: string, versionId: string) {
+  const r = await fetch(`${API}/me/activations`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ versionId }),
+  });
+  expect(r.ok).toBeTruthy();
+}
 
 test('global consent gate: nothing patches until granted, reverts when revoked', async ({}, testInfo) => {
   test.setTimeout(120_000);
@@ -44,22 +57,29 @@ test('global consent gate: nothing patches until granted, reverts when revoked',
       body: JSON.stringify({ email: `cg_${rnd}@example.com`, password: 'password123', handle: `cg_${rnd}` }),
     }),
   );
-  // A version that rewrites example.com's <h1>.
-  await fetch(`${API}/versions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${su.token}` },
-    body: JSON.stringify({
-      url: PAGE,
-      name: 'consent gate',
-      patches: [{ op: 'textReplace', target: { cssSelector: 'h1' }, payload: { from: ORIGINAL, to: 'PATCHED' }, order: 0 }],
+  // A version that rewrites example.com's <h1>, which the viewer activates (opts in).
+  const created = await json(
+    await fetch(`${API}/versions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${su.token}` },
+      body: JSON.stringify({
+        url: PAGE,
+        name: 'consent gate',
+        patches: [{ op: 'textReplace', target: { cssSelector: 'h1' }, payload: { from: ORIGINAL, to: 'PATCHED' }, order: 0 }],
+      }),
     }),
-  });
+  );
+  await activate(su.token, created.id as string);
 
   const ctx = await chromium.launchPersistentContext(testInfo.outputPath('profile'), {
     headless: false,
     args: ['--headless=new', `--disable-extensions-except=${EXT_PATH}`, `--load-extension=${EXT_PATH}`, '--no-sandbox'],
   });
   try {
+    // Authenticate the SW as the viewer so the content script fetches their activations.
+    const sw = await getSW(ctx);
+    await setToken(sw, su.token);
+
     const page = await ctx.newPage();
     await page.goto(PAGE, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     const h1 = page.locator('h1').first();
@@ -71,8 +91,7 @@ test('global consent gate: nothing patches until granted, reverts when revoked',
     await expect(h1).toHaveText(ORIGINAL);
     console.log('[e2e] pre-consent: not patched, modal shown ✓');
 
-    // Grant consent → the version auto-applies and the modal is dismissed.
-    const sw = await getSW(ctx);
+    // Grant consent → the activated version applies and the modal is dismissed.
     await setConsent(sw, 'granted');
     await expect(h1).toHaveText('PATCHED', { timeout: 20_000 });
     await expect(page.locator('#yandz-consent-host')).toHaveCount(0);

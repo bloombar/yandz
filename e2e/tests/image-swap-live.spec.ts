@@ -82,6 +82,14 @@ test('image swap shows on the real unherd page (loopback asset proxied as data: 
   expect(created.id, 'version created').toBeTruthy();
   const versionId = created.id as string;
 
+  // Activate it (opt in) so the content script applies it on load.
+  const act = await fetch(`${API}/me/activations`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ versionId }),
+  });
+  expect(act.ok, 'activation ok').toBeTruthy();
+
   // --- 2. Load the real page with the BUILT extension; the hash auto-applies. ---
   const ctx = await chromium.launchPersistentContext(testInfo.outputPath('profile'), {
     headless: false, // real headless is requested via --headless=new (MV3 needs it, not old headless)
@@ -93,13 +101,14 @@ test('image swap shows on the real unherd page (loopback asset proxied as data: 
     ],
   });
   try {
-    // Grant the global "modify web pages" consent so the content script applies patches.
+    // Authenticate the SW as the viewer + grant consent so the activation applies.
     const sw = ctx.serviceWorkers()[0] ?? (await ctx.waitForEvent('serviceworker'));
-    await sw.evaluate(async () => {
+    await sw.evaluate(async (t) => {
+      await (globalThis as any).chrome.storage.session.set({ token: t });
       await (globalThis as any).chrome.storage.local.set({ 'yandz:consent': 'granted' });
-    });
+    }, token);
     const page = await ctx.newPage();
-    await page.goto(`${ARTICLE}#yandz-v=${versionId}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await page.goto(ARTICLE, { waitUntil: 'domcontentloaded', timeout: 60_000 });
 
     const img = page.locator(TARGET).first();
     await expect(img, 'target <img> exists on the page').toHaveCount(1, { timeout: 30_000 });

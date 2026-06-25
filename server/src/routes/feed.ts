@@ -25,7 +25,9 @@ const FEED_LIMIT = 50;
 // paginate: pages slice into this candidate set, so it bounds reachable scroll depth.
 const CANDIDATE_CAP = 1000;
 
-type FeedScope = 'page' | 'site' | 'global';
+// 'latest' is a cross-page feed of ALL page-scoped versions (page modifications
+// everywhere), as opposed to 'page' which is restricted to the viewer's current page.
+type FeedScope = 'latest' | 'page' | 'site' | 'global';
 type FeedFilter = 'all' | 'following' | 'mine';
 
 /** Parse & clamp the pagination query params. */
@@ -40,7 +42,7 @@ function escapeRegex(s: string): string {
 }
 
 const asScope = (v: unknown): FeedScope =>
-  v === 'page' || v === 'site' || v === 'global' ? v : 'global';
+  v === 'latest' || v === 'page' || v === 'site' || v === 'global' ? v : 'global';
 const asFilter = (v: unknown): FeedFilter =>
   v === 'all' || v === 'following' || v === 'mine' ? v : 'all';
 
@@ -84,6 +86,8 @@ function scopeFilter(
   pageId: Types.ObjectId | null,
   host: string,
 ): Record<string, unknown> | null {
+  // 'latest': every page-scoped version, across all pages (no page restriction).
+  if (scope === 'latest') return { scope: 'page' as VersionScope };
   if (scope === 'page') return pageId ? { scope: 'page' as VersionScope, pageId } : null;
   if (scope === 'site') return host ? { scope: 'site' as VersionScope, host } : null;
   return { scope: 'global' as VersionScope };

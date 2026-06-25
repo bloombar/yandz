@@ -53,12 +53,12 @@ async function setup(): Promise<{ versionId: string; patch: unknown }> {
       body: JSON.stringify({ url: ARTICLE, name: 'E2E persist swap', patches: [patch] }),
     }),
   );
-  return { versionId: created.id as string, patch };
+  return { versionId: created.id as string, patch, token };
 }
 
-test('image swap survives editor close (preview → apply-version)', async ({}, testInfo) => {
+test('image swap survives editor close (preview → activate)', async ({}, testInfo) => {
   test.setTimeout(120_000);
-  const { versionId, patch } = await setup();
+  const { versionId, patch, token } = await setup();
 
   const ctx = await chromium.launchPersistentContext(testInfo.outputPath('profile'), {
     headless: false,
@@ -76,10 +76,11 @@ test('image swap survives editor close (preview → apply-version)', async ({}, 
     const originalSrc = await img.getAttribute('src');
     expect(originalSrc, 'no patches before consent').not.toMatch(/^data:image\//);
 
-    // Grant the global "modify web pages" consent; the content script reacts live.
-    await sw.evaluate(async () => {
+    // Authenticate the SW as the viewer + grant consent; the content script reacts live.
+    await sw.evaluate(async (t) => {
+      await (globalThis as any).chrome.storage.session.set({ token: t });
       await (globalThis as any).chrome.storage.local.set({ 'yandz:consent': 'granted' });
-    });
+    }, token);
 
     const tabId = await sw.evaluate(async () => {
       const tabs = await (globalThis as any).chrome.tabs.query({});
@@ -111,18 +112,21 @@ test('image swap survives editor close (preview → apply-version)', async ({}, 
       }, 5);
     });
 
-    // --- Step B: editor closes → activate the saved version (yandz:apply-version). ---
-    await sw.evaluate(
-      async ([id, vid]: [number, string]) => {
-        await (globalThis as any).chrome.tabs.sendMessage(id, { type: 'yandz:apply-version', versionId: vid });
-      },
-      [tabId, versionId] as [number, string],
-    );
+    // --- Step B: editor closes → activate the saved version, then the content re-fetches
+    // its activations and applies them (the same path the panel triggers via onSaved). ---
+    await fetch(`${API}/me/activations`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ versionId }),
+    });
+    await sw.evaluate(async (id: number) => {
+      await (globalThis as any).chrome.tabs.sendMessage(id, { type: 'yandz:refresh-activations' });
+    }, tabId);
 
     // The swap MUST still be there after the editor closes.
     await expect
       .poll(async () => await img.getAttribute('src'), {
-        message: 'swap persists after editor close (apply-version)',
+        message: 'swap persists after editor close (activate + refresh)',
         timeout: 30_000,
         intervals: [500, 1000, 2000, 3000],
       })

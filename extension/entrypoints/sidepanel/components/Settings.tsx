@@ -123,9 +123,9 @@ export function Settings({ onOpenProfile, onClose, messageTab, onOpenChanges }: 
     </>
   );
 
-  /** Deactivate a version, then refresh the lists + the loaded page. */
+  /** Remove a version's activation, then refresh the lists + the loaded page. */
   const deactivate = async (versionId: string) => {
-    await Api.deactivate(versionId).catch(() => {});
+    await Api.removeActivation(versionId).catch(() => {});
     refreshPage();
     await loadActivations();
   };

@@ -45,6 +45,11 @@ export interface FeedItem extends VersionSummary {
   parentName: string | null;
 }
 
+/** An activated version: a feed item plus whether it's currently enabled (applied). */
+export interface ActiveItem extends FeedItem {
+  on: boolean;
+}
+
 export interface FeedResult {
   /** Normalized key of the active tab's page (for "this page" comparisons), or null. */
   currentPageKey: string | null;
@@ -55,8 +60,10 @@ export interface FeedResult {
 
 /** Sort within a tab: personalized "Your feed" or strict reverse-chronological. */
 export type FeedSort = 'foryou' | 'latest';
-/** The scope tabs: This page / This site / Global. */
+/** A version's scope tabs: This page / This site / Global. */
 export type FeedScope = 'page' | 'site' | 'global';
+/** The feed tabs. 'latest' is a cross-page "For you" feed of page-scoped versions. */
+export type FeedTab = 'latest' | FeedScope;
 /** The in-tab filter chips. 'bookmarked' is served by the bookmarks endpoint. */
 export type FeedFilter = 'all' | 'following' | 'mine' | 'bookmarked';
 
@@ -156,7 +163,7 @@ export const Api = {
   // foryou|latest. `url` is the active tab's URL (resolves the page/site context); `q` is
   // an optional free-text search; `offset`/`limit` paginate (infinite scroll).
   getFeed: (
-    scope: FeedScope,
+    scope: FeedTab,
     filter: 'all' | 'following' | 'mine',
     sort: FeedSort,
     url?: string,
@@ -168,8 +175,8 @@ export const Api = {
       `/feed?scope=${scope}&filter=${filter}&sort=${sort}&url=${encodeURIComponent(url ?? '')}${pageQuery(q, offset, limit)}`,
     ),
 
-  // The viewer's bookmarked versions within a scope tab (the "Bookmarked" filter chip).
-  getBookmarksFeed: (scope: FeedScope, url?: string, q?: string, offset?: number, limit?: number) =>
+  // The viewer's bookmarked versions within a tab (the "Bookmarked" filter chip).
+  getBookmarksFeed: (scope: FeedTab, url?: string, q?: string, offset?: number, limit?: number) =>
     api<FeedResult>(`/feed/bookmarks?scope=${scope}&url=${encodeURIComponent(url ?? '')}${pageQuery(q, offset, limit)}`),
 
   toggleBookmark: (id: string, on: boolean) =>
@@ -235,21 +242,28 @@ export const Api = {
   subscribePush: (subscription: PushSubscriptionJSON) =>
     api('/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription }) }),
 
-  // --- Activations (/me/activations): the viewer's opted-in site/global versions ---
-  // Active versions relevant to this URL (every global + the matching-host site), to
-  // auto-apply on load. Returns full feed items so the content script has the patches.
+  // --- Activations (/me/activations): the viewer's opted-in versions ---
+  // The active versions RELEVANT to this URL (every global + matching-host site +
+  // matching page), each tagged with `on` (enabled vs paused). Full feed items so the
+  // content script has the patches to apply.
   getActivations: (url: string) =>
-    api<{ versions: FeedItem[] }>(`/me/activations?url=${encodeURIComponent(url)}`),
-  // The viewer's active versions split by scope, for the account-settings lists.
-  getActivationsList: () => api<{ site: FeedItem[]; global: FeedItem[] }>('/me/activations/list'),
-  // Opt in to a site/global version. Returns the version it replaced in that scope
-  // slot (or null), so the caller can flip the replaced toggle off.
+    api<{ versions: ActiveItem[] }>(`/me/activations?url=${encodeURIComponent(url)}`),
+  // The viewer's activations split by scope, for the account-settings lists.
+  getActivationsList: () => api<{ page: ActiveItem[]; site: ActiveItem[]; global: ActiveItem[] }>('/me/activations/list'),
+  // Opt in to a version (idempotent; re-enables a paused one). Returns the version's
+  // page urlKey so the caller can navigate there if it targets a different page/site.
   activate: (versionId: string) =>
-    api<{ activated: true; scope: VersionScope; host: string; replacedVersionId: string | null }>('/me/activations', {
+    api<{ activated: true; scope: VersionScope; urlKey: string }>('/me/activations', {
       method: 'POST',
       body: JSON.stringify({ versionId }),
     }),
-  // Deactivate (permanently, until re-activated).
-  deactivate: (versionId: string) =>
-    api<{ deactivated: true }>(`/me/activations/${versionId}`, { method: 'DELETE' }),
+  // Pause/resume an activation (keeps the opt-in) — the applied bar's toggle.
+  setActivationEnabled: (versionId: string, enabled: boolean) =>
+    api<{ ok: true; enabled: boolean }>(`/me/activations/${versionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
+  // Remove an activation entirely — the applied bar's ✕.
+  removeActivation: (versionId: string) =>
+    api<{ removed: true }>(`/me/activations/${versionId}`, { method: 'DELETE' }),
 };

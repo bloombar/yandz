@@ -1,8 +1,9 @@
 /**
- * Integration tests for the activation routes (/me/activations). A viewer opts in to
- * public site/global versions; an activation auto-applies on matching pages, replaces
- * the prior version in its scope slot, is isolated per user, and is cleaned up when its
- * version is deleted.
+ * Integration tests for the activation routes (/me/activations). A viewer may activate
+ * MANY versions of each scope; they layer together. Activations are relevant to a URL by
+ * scope (global everywhere, site by host, page by exact page), can be paused (kept but
+ * not applied) or removed, are isolated per user, and are cleaned up when their version
+ * is deleted.
  */
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
@@ -34,89 +35,112 @@ async function makeVersion(token: string, url: string, scope: 'page' | 'site' | 
   return res.body.id as string;
 }
 
+const activate = (token: string, versionId: string) =>
+  request(app).post('/me/activations').set(auth(token)).send({ versionId });
+const relevant = (token: string, url: string) =>
+  request(app).get('/me/activations').query({ url }).set(auth(token));
+const ids = (res: { body: { versions: { id: string }[] } }) => res.body.versions.map((v) => v.id);
+
 describe('/me/activations', () => {
-  it('applies a global activation everywhere and a site activation only on its host', async () => {
-    const author = await makeUser('actAuthor');
-    const viewer = await makeUser('actViewer');
-    const siteId = await makeVersion(author.token, 'https://site-a.com/page1', 'site');
-    const globalId = await makeVersion(author.token, 'https://anywhere.test/x', 'global');
-
-    // Viewer opts in to both.
-    const aSite = await request(app).post('/me/activations').set(auth(viewer.token)).send({ versionId: siteId });
-    expect(aSite.status).toBe(200);
-    expect(aSite.body).toMatchObject({ activated: true, scope: 'site', host: 'site-a.com', replacedVersionId: null });
-    const aGlobal = await request(app).post('/me/activations').set(auth(viewer.token)).send({ versionId: globalId });
-    expect(aGlobal.body).toMatchObject({ activated: true, scope: 'global', replacedVersionId: null });
-
-    // On the same host (different page): global + site both relevant.
-    const onHost = await request(app).get('/me/activations').query({ url: 'https://site-a.com/page2' }).set(auth(viewer.token));
-    expect(onHost.status).toBe(200);
-    expect(onHost.body.versions.map((v: { id: string }) => v.id).sort()).toEqual([siteId, globalId].sort());
-
-    // On a different host: only the global activation is relevant.
-    const offHost = await request(app).get('/me/activations').query({ url: 'https://elsewhere.test/y' }).set(auth(viewer.token));
-    expect(offHost.body.versions).toHaveLength(1);
-    expect(offHost.body.versions[0].id).toBe(globalId);
-
-    // Activations are isolated: the author opted in to nothing.
-    const authorView = await request(app).get('/me/activations').query({ url: 'https://site-a.com/page2' }).set(auth(author.token));
-    expect(authorView.body.versions).toHaveLength(0);
-  });
-
-  it('replaces the version in a scope slot when a new one is activated', async () => {
-    const author = await makeUser('actAuthor2');
-    const viewer = await makeUser('actViewer2');
+  it('lets a user activate MANY versions per scope, layered together', async () => {
+    const author = await makeUser('multiAuthor');
+    const viewer = await makeUser('multiViewer');
     const g1 = await makeVersion(author.token, 'https://a.test/1', 'global');
     const g2 = await makeVersion(author.token, 'https://b.test/2', 'global');
+    await activate(viewer.token, g1);
+    const second = await activate(viewer.token, g2);
+    expect(second.status).toBe(200);
 
-    await request(app).post('/me/activations').set(auth(viewer.token)).send({ versionId: g1 });
-    const replace = await request(app).post('/me/activations').set(auth(viewer.token)).send({ versionId: g2 });
-    expect(replace.body.replacedVersionId).toBe(g1);
-
-    // Only the newest global remains active.
-    const active = await request(app).get('/me/activations').query({ url: 'https://anything.test/z' }).set(auth(viewer.token));
-    expect(active.body.versions.map((v: { id: string }) => v.id)).toEqual([g2]);
+    // Both globals are active (no replacement).
+    const active = await relevant(viewer.token, 'https://anywhere.test/x');
+    expect(ids(active).sort()).toEqual([g1, g2].sort());
+    expect(active.body.versions.every((v: { on: boolean }) => v.on === true)).toBe(true);
   });
 
-  it('lists active versions split by scope and deactivates them', async () => {
-    const author = await makeUser('actAuthor3');
-    const viewer = await makeUser('actViewer3');
-    const siteId = await makeVersion(author.token, 'https://list.test/p', 'site');
-    const globalId = await makeVersion(author.token, 'https://list2.test/p', 'global');
-    await request(app).post('/me/activations').set(auth(viewer.token)).send({ versionId: siteId });
-    await request(app).post('/me/activations').set(auth(viewer.token)).send({ versionId: globalId });
+  it('resolves relevance by scope: global everywhere, site by host, page by exact page', async () => {
+    const author = await makeUser('relAuthor');
+    const viewer = await makeUser('relViewer');
+    const globalId = await makeVersion(author.token, 'https://global.test/x', 'global');
+    const siteId = await makeVersion(author.token, 'https://site.test/a', 'site');
+    const pageId = await makeVersion(author.token, 'https://site.test/p1', 'page');
+    await activate(viewer.token, globalId);
+    await activate(viewer.token, siteId);
+    await activate(viewer.token, pageId);
 
-    let list = await request(app).get('/me/activations/list').set(auth(viewer.token));
-    expect(list.body.site.map((v: { id: string }) => v.id)).toEqual([siteId]);
-    expect(list.body.global.map((v: { id: string }) => v.id)).toEqual([globalId]);
-
-    const off = await request(app).delete(`/me/activations/${siteId}`).set(auth(viewer.token));
-    expect(off.body).toEqual({ deactivated: true });
-    list = await request(app).get('/me/activations/list').set(auth(viewer.token));
-    expect(list.body.site).toHaveLength(0);
-    expect(list.body.global).toHaveLength(1);
+    // On the exact page of the site: global + site + page all relevant.
+    expect(ids(await relevant(viewer.token, 'https://site.test/p1')).sort()).toEqual([globalId, siteId, pageId].sort());
+    // Another page of the same host: global + site (not the page version).
+    expect(ids(await relevant(viewer.token, 'https://site.test/other')).sort()).toEqual([globalId, siteId].sort());
+    // A different host: only the global.
+    expect(ids(await relevant(viewer.token, 'https://elsewhere.test/y'))).toEqual([globalId]);
   });
 
-  it('rejects activating a page-scoped version', async () => {
-    const author = await makeUser('actAuthor4');
-    const viewer = await makeUser('actViewer4');
-    const pageId = await makeVersion(author.token, 'https://page.test/p', 'page');
-    const res = await request(app).post('/me/activations').set(auth(viewer.token)).send({ versionId: pageId });
-    expect(res.status).toBe(400);
+  it('pauses (keeps but does not apply) and resumes an activation', async () => {
+    const author = await makeUser('pauseAuthor');
+    const viewer = await makeUser('pauseViewer');
+    const g = await makeVersion(author.token, 'https://p.test/x', 'global');
+    await activate(viewer.token, g);
+
+    const off = await request(app).patch(`/me/activations/${g}`).set(auth(viewer.token)).send({ enabled: false });
+    expect(off.body).toEqual({ ok: true, enabled: false });
+    // Still listed (so the bar can show it), but flagged off.
+    let active = await relevant(viewer.token, 'https://p.test/x');
+    expect(ids(active)).toEqual([g]);
+    expect(active.body.versions[0].on).toBe(false);
+
+    await request(app).patch(`/me/activations/${g}`).set(auth(viewer.token)).send({ enabled: true });
+    active = await relevant(viewer.token, 'https://p.test/x');
+    expect(active.body.versions[0].on).toBe(true);
   });
 
-  it('cleans up an activation when its version is deleted', async () => {
-    const author = await makeUser('actAuthor5');
-    const viewer = await makeUser('actViewer5');
-    const globalId = await makeVersion(author.token, 'https://del.test/p', 'global');
-    await request(app).post('/me/activations').set(auth(viewer.token)).send({ versionId: globalId });
+  it('removes an activation entirely', async () => {
+    const author = await makeUser('rmAuthor');
+    const viewer = await makeUser('rmViewer');
+    const g = await makeVersion(author.token, 'https://r.test/x', 'global');
+    await activate(viewer.token, g);
+    const rm = await request(app).delete(`/me/activations/${g}`).set(auth(viewer.token));
+    expect(rm.body).toEqual({ removed: true });
+    expect(ids(await relevant(viewer.token, 'https://r.test/x'))).toHaveLength(0);
+  });
 
-    await request(app).delete(`/versions/${globalId}`).set(auth(author.token)).expect(200);
+  it('lists activations split by scope; activations are isolated per user', async () => {
+    const author = await makeUser('listAuthor');
+    const viewer = await makeUser('listViewer');
+    const g = await makeVersion(author.token, 'https://l.test/g', 'global');
+    const s = await makeVersion(author.token, 'https://l.test/s', 'site');
+    const p = await makeVersion(author.token, 'https://l.test/p', 'page');
+    await activate(viewer.token, g);
+    await activate(viewer.token, s);
+    await activate(viewer.token, p);
 
-    // The stale activation is self-healed away on the next read.
-    const active = await request(app).get('/me/activations').query({ url: 'https://x.test/y' }).set(auth(viewer.token));
-    expect(active.body.versions).toHaveLength(0);
     const list = await request(app).get('/me/activations/list').set(auth(viewer.token));
-    expect(list.body.global).toHaveLength(0);
+    expect(list.body.global.map((v: { id: string }) => v.id)).toEqual([g]);
+    expect(list.body.site.map((v: { id: string }) => v.id)).toEqual([s]);
+    expect(list.body.page.map((v: { id: string }) => v.id)).toEqual([p]);
+
+    // The author opted into nothing.
+    const authorList = await request(app).get('/me/activations/list').set(auth(author.token));
+    expect(authorList.body.global).toHaveLength(0);
+  });
+
+  it('re-activating is idempotent and re-enables a paused activation', async () => {
+    const author = await makeUser('reAuthor');
+    const viewer = await makeUser('reViewer');
+    const g = await makeVersion(author.token, 'https://re.test/x', 'global');
+    await activate(viewer.token, g);
+    await request(app).patch(`/me/activations/${g}`).set(auth(viewer.token)).send({ enabled: false });
+    await activate(viewer.token, g); // re-activate
+    const active = await relevant(viewer.token, 'https://re.test/x');
+    expect(ids(active)).toEqual([g]); // still one row
+    expect(active.body.versions[0].on).toBe(true); // re-enabled
+  });
+
+  it('cleans up activations when their version is deleted', async () => {
+    const author = await makeUser('delAuthor');
+    const viewer = await makeUser('delViewer');
+    const g = await makeVersion(author.token, 'https://del.test/x', 'global');
+    await activate(viewer.token, g);
+    await request(app).delete(`/versions/${g}`).set(auth(author.token)).expect(200);
+    expect(ids(await relevant(viewer.token, 'https://x.test/y'))).toHaveLength(0);
   });
 });

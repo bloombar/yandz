@@ -16,7 +16,7 @@
  */
 import { defineContentScript } from 'wxt/sandbox';
 import { browser } from 'wxt/browser';
-import type { PageVersions, VersionSummary } from '../lib/api.js';
+import type { PageVersions, ActiveItem } from '../lib/api.js';
 
 /**
  * Fetch page versions via the background SW. A direct fetch from the content
@@ -32,10 +32,10 @@ async function getVersions(url: string): Promise<PageVersions | null> {
   })) as PageVersions | null;
 }
 
-/** The viewer's opted-in site/global versions to auto-apply on this URL (via background). */
-async function getActivations(url: string): Promise<VersionSummary[]> {
+/** The viewer's activations relevant to this URL (each tagged on/off), via background. */
+async function getActivations(url: string): Promise<ActiveItem[]> {
   try {
-    const res = (await browser.runtime.sendMessage({ type: 'yandz:get-activations', url })) as VersionSummary[] | null;
+    const res = (await browser.runtime.sendMessage({ type: 'yandz:get-activations', url })) as ActiveItem[] | null;
     return res ?? [];
   } catch {
     return [];
@@ -159,21 +159,21 @@ export default defineContentScript({
     const isTop = window === window.top;
     const engine = new PatchEngine();
     const overlay = new OverlayRenderer();
-    // A page shows up to three versions at once, one per scope, layered bottom→top:
-    // global (bottom) under site under page (top). Each slot holds the applied version
-    // (or null) and an on/off toggle. The page slot comes from this page's ranked
-    // versions; the site/global slots from the viewer's opted-in activations.
+    // A page can show MANY active versions at once, layered bottom→top by scope: globals
+    // (bottom), then site versions (matching host), then page versions (matching page,
+    // top). Within a scope they layer in activation order. `activeList` is the viewer's
+    // activations relevant to THIS url (fetched from the server); each carries an on/off
+    // (enabled) flag — paused ones stay in the bar but aren't applied.
     type Scope = 'global' | 'site' | 'page';
     const SCOPE_ORDER: Scope[] = ['global', 'site', 'page']; // bottom → top (page wins)
-    interface Layer {
-      version: VersionSummary | null;
+    interface Active {
+      version: ActiveItem;
+      scope: Scope;
       on: boolean;
     }
-    const layers: Record<Scope, Layer> = {
-      global: { version: null, on: true },
-      site: { version: null, on: true },
-      page: { version: null, on: true },
-    };
+    let activeList: Active[] = [];
+    // Editor draft, layered on TOP of everything while a version is being edited.
+    let preview: AnyPatch[] | null = null;
 
     // The merged patches currently applied to the DOM, plus the asset map (original
     // image URL → inlined data: URL). The MutationObserver re-applies THESE.
@@ -181,8 +181,6 @@ export default defineContentScript({
     let currentAssets: Map<string, string> = new Map();
     // Holds the fetched page versions once loaded (null until then / on failure).
     let data: PageVersions | null = null;
-    // The viewer's opted-in site/global versions for this URL (fetched once on load).
-    let activations: VersionSummary[] = [];
     // Stops the active page-side tool (drawing), so it can be torn down when the
     // editor closes or another tool starts.
     let activeStop: (() => void) | null = null;
@@ -192,16 +190,11 @@ export default defineContentScript({
     // settings changes take effect live.
     let consented = false;
 
-    /** The versions currently applied, by scope (drives the panel's applied bar +
-     *  per-page highlight). Includes versions auto-applied on load, before the panel
-     *  was open. Persisted to shared session storage (reliable regardless of message
-     *  timing) and also broadcast for live updates. */
-    function appliedSet(): { scope: Scope; versionId: string; name: string }[] {
-      return SCOPE_ORDER.filter((s) => layers[s].on && layers[s].version).map((s) => ({
-        scope: s,
-        versionId: layers[s].version!.id,
-        name: layers[s].version!.name,
-      }));
+    /** The active versions for this page (drives the panel's applied bar + per-page
+     *  highlight). Includes PAUSED ones (on=false) so the bar can show them as inactive
+     *  until removed. Persisted to shared session storage + broadcast for live updates. */
+    function appliedSet(): { scope: Scope; versionId: string; name: string; on: boolean }[] {
+      return activeList.map((a) => ({ scope: a.scope, versionId: a.version.id, name: a.version.name, on: a.on }));
     }
 
     function notifyApplied(): void {
@@ -211,20 +204,22 @@ export default defineContentScript({
       void browser.runtime.sendMessage({ type: 'yandz:applied', urlKey: urlKey ?? null, applied }).catch(() => {});
     }
 
-    /** Merge the active layers' patches bottom→top (global, site, page) into one list,
-     *  rewriting each patch's `order` so a page patch overrides a site patch overrides a
-     *  global patch on a shared element (see mergeScopedPatches). */
+    /** Merge all ENABLED active versions bottom→top (globals, then sites, then pages) plus
+     *  the editor preview on top, rewriting each patch's `order` so higher layers override
+     *  lower ones on a shared element (see mergeScopedPatches). */
     function effectivePatches(): AnyPatch[] {
-      const active = SCOPE_ORDER.filter((s) => layers[s].on && layers[s].version).map((s) => ({
-        patches: layers[s].version!.patches,
-      }));
-      return mergeScopedPatches(active);
+      const layers: { patches: AnyPatch[] }[] = [];
+      for (const s of SCOPE_ORDER) {
+        for (const a of activeList) if (a.scope === s && a.on) layers.push({ patches: a.version.patches });
+      }
+      if (preview) layers.push({ patches: preview });
+      return mergeScopedPatches(layers);
     }
 
-    /** Rebuild the page from the current layer set — the single source of truth for what
-     *  is on the page. Resolve assets BEFORE reverting so a MutationObserver re-apply
-     *  during the async gap can't flash an unresolved (loopback) image, then revert
-     *  everything and apply the merged set. Every layer change goes through here. */
+    /** Rebuild the page from the active set — the single source of truth for what is on
+     *  the page. Resolve assets BEFORE reverting so a MutationObserver re-apply during the
+     *  async gap can't flash an unresolved (loopback) image, then revert everything and
+     *  apply the merged set. Every change goes through here. */
     async function reapplyAll(): Promise<void> {
       if (!consented) return; // no patching without consent
       const eff = effectivePatches();
@@ -240,37 +235,29 @@ export default defineContentScript({
       notifyApplied();
     }
 
-    /** Set the page-scope layer to a version (or null) and rebuild. */
-    function setPageVersion(version: VersionSummary | null): Promise<void> {
-      layers.page = { version, on: true };
-      return reapplyAll();
-    }
-
-    /** Editor preview: show an arbitrary draft patch set as the page layer (keeping the
-     *  applied version's identity for the bar), then rebuild. */
+    /** Editor preview: show a draft patch set layered on top, then rebuild. */
     function previewPatches(patches: AnyPatch[]): Promise<void> {
-      const base = layers.page.version;
-      const preview = { ...(base ?? { id: 'preview', name: 'Draft', scope: 'page' }), patches } as VersionSummary;
-      layers.page = { version: preview, on: true };
+      preview = patches;
       return reapplyAll();
     }
 
-    /** Re-fetch the viewer's activations for this URL and reseed the site/global layers,
-     *  then rebuild. Called after an activate/deactivate/replace from the panel. */
+    /** Re-fetch the viewer's activations relevant to this URL, rebuild the active list,
+     *  and re-apply. Called after any activate / toggle / remove from the panel. Clears
+     *  any editor preview (a real refresh reflects the committed state). */
     async function refreshActivations(): Promise<void> {
-      const active = await getActivations(location.href);
-      layers.site = { version: active.find((v) => v.scope === 'site') ?? null, on: true };
-      layers.global = { version: active.find((v) => v.scope === 'global') ?? null, on: true };
+      const items = await getActivations(location.href);
+      activeList = items.map((it) => ({ version: it, scope: it.scope as Scope, on: it.on }));
+      preview = null;
       await reapplyAll();
     }
 
-    /** "Revert to original": turn every layer off (transient) and strip the DOM back to
-     *  the published page. Reverts directly (NOT via reapplyAll) so it also works when
-     *  consent has just been revoked — reapplyAll is consent-gated, but reverting must
-     *  always succeed. Activations are NOT removed: the next load (or a re-grant) re-applies
-     *  them, and the bar can toggle a layer back on. Permanent removal is via settings. */
+    /** "Revert to original": strip the DOM back to the published page. Reverts directly
+     *  (NOT via reapplyAll) so it also works when consent has just been revoked. Marks the
+     *  active list off transiently; the next load (or re-grant) re-fetches the real state.
+     *  Removal of opt-ins is done from the panel. */
     function revertToOriginal(): void {
-      for (const s of SCOPE_ORDER) layers[s].on = false;
+      preview = null;
+      for (const a of activeList) a.on = false;
       engine.revertAll();
       overlay.clear();
       currentPatches = [];
@@ -306,46 +293,24 @@ export default defineContentScript({
     if (isTop)
     browser.runtime.onMessage.addListener((msg: any) => {
       switch (msg?.type) {
-        case 'yandz:apply-version': {
-          // Apply a page-scoped version in place (the page layer). Site/global versions
-          // apply via activations (yandz:refresh-activations), not here.
-          const found = data?.versions.find((v) => v.id === msg.versionId);
-          if (found) {
-            void setPageVersion(found);
-          } else {
-            // A just-created version won't be in our cached list — re-fetch, then apply.
-            void getVersions(location.href)
-              .then((fresh) => {
-                if (!fresh) return;
-                data = fresh;
-                const v = fresh.versions.find((x) => x.id === msg.versionId);
-                if (v) void setPageVersion(v);
-              })
-              .catch(() => {});
-          }
-          break;
-        }
         case 'yandz:revert':
           revertToOriginal();
           break;
-        case 'yandz:toggle-scope':
-          // Bar toggle: turn one layer on/off (transient). For site/global the panel
-          // also persists the change via activate/deactivate; for page it's session-only.
-          if (msg.scope === 'global' || msg.scope === 'site' || msg.scope === 'page') {
-            layers[msg.scope as Scope].on = !!msg.on;
-            void reapplyAll();
-          }
-          break;
         case 'yandz:refresh-activations':
-          // An activation changed (opt in/out in the feed, the bar, or account settings)
-          // — re-fetch the viewer's active site/global versions and re-apply so the page
-          // reflects it immediately, without a reload.
+          // An activation changed (activate / pause / remove in the feed, the bar, or
+          // settings) — re-fetch the active set and re-apply so the page reflects it
+          // immediately, without a reload.
           void refreshActivations();
           break;
         case 'yandz:stop-tools':
-          // Editor closed (or switched away) — tear down any active drawing layer.
+          // Editor closed (or switched away) — tear down any active drawing layer and drop
+          // any uncommitted preview so the page shows the committed active set.
           activeStop?.();
           activeStop = null;
+          if (preview) {
+            preview = null;
+            void reapplyAll();
+          }
           break;
         case 'yandz:highlight-element':
           // Clicking a change in the editor flashes its element on the page.
@@ -408,31 +373,11 @@ export default defineContentScript({
       }
     });
 
-    /** Seed all three layers and apply. The site/global slots come from the viewer's
-     *  activations; the page slot from this page's ranked versions (a shared link
-     *  `#yandz-v=<id>` or a queued "pending apply" pins an exact version, else the
-     *  top-ranked one). No-op without consent (reapplyAll also hard-gates). */
+    /** Apply the viewer's active set for this page. The active list is fetched on load
+     *  (and re-fetched on refresh-activations); this just rebuilds the DOM. No-op without
+     *  consent (reapplyAll also hard-gates). */
     async function applyForPage(): Promise<void> {
       if (!consented) return;
-      // Site/global layers from opt-in activations (already fetched into `activations`).
-      layers.site = { version: activations.find((v) => v.scope === 'site') ?? null, on: true };
-      layers.global = { version: activations.find((v) => v.scope === 'global') ?? null, on: true };
-
-      // Page layer from this page's ranked versions.
-      let pageVersion: VersionSummary | null = null;
-      if (data && data.versions.length > 0) {
-        const hashMatch = location.hash.match(/yandz-v=([a-f0-9]+)/i);
-        const pendingKey = `pendingApply:${data.page.urlKey}`;
-        const pendingId =
-          hashMatch?.[1] ?? ((await browser.storage.local.get(pendingKey))[pendingKey] as string | undefined);
-        if (pendingId) {
-          await browser.storage.local.remove(pendingKey);
-          pageVersion = data.versions.find((v) => v.id === pendingId) ?? data.versions[0]!;
-        } else {
-          pageVersion = data.versions[0]!;
-        }
-      }
-      layers.page = { version: pageVersion, on: true };
       await reapplyAll();
     }
 
@@ -453,9 +398,9 @@ export default defineContentScript({
     // needless requests. (The top frame is always an http(s) page.)
     if (!/^https?:\/\//.test(location.href)) return;
 
-    // Fetch this frame's versions + personal layer and (top frame) mount the floating
-    // icon REGARDLESS of consent (these are reads, not modifications). Done BEFORE any
-    // modal await so a consent grant (modal or another tab) has data ready to apply.
+    // Fetch this frame's page versions (for the floating-icon count) and the viewer's
+    // active set REGARDLESS of consent (these are reads, not modifications). Done BEFORE
+    // any modal await so a consent grant (modal or another tab) has data ready to apply.
     // Each frame fetches for ITS OWN URL, so cross-origin iframes get their own page's
     // versions independently of the outer page.
     try {
@@ -463,7 +408,7 @@ export default defineContentScript({
     } catch {
       return; // backend unreachable
     }
-    activations = await getActivations(location.href);
+    activeList = (await getActivations(location.href)).map((it) => ({ version: it, scope: it.scope as Scope, on: it.on }));
     if (isTop && data && data.versions.length > 0) {
       mountFloatingIcon({
         count: data.versions.length,

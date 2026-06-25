@@ -147,25 +147,29 @@ const bookmarkSchema = new Schema(
 bookmarkSchema.index({ userId: 1, versionId: 1 }, { unique: true });
 export const Bookmark = model('Bookmark', bookmarkSchema);
 
-// --- Activation (a user's opted-in site/global version) -------------------
-// A persisted opt-in: a viewer activates a public site/global version so it
-// auto-re-applies on every matching page until deactivated. `scope`/`host` are
-// denormalized from the Version so the unique key enforces "one active per scope
-// instance" (one global per user; one site per user per host) and replacement is a
-// plain upsert. Page-scoped versions are never activated (they live in session state).
+// --- Activation (a user's opted-in version) -------------------------------
+// A persisted opt-in: a viewer activates a version so it auto-applies on matching
+// pages. A user may activate MANY versions of each scope; they layer together. `scope`,
+// `host`, and `pageKey` are denormalized from the Version so "which activations apply on
+// this URL" resolves without a join: global ones always, site ones whose host matches,
+// page ones whose pageKey matches. `enabled` lets a user pause a version (keeping the
+// opt-in) versus removing it entirely.
 const activationSchema = new Schema(
   {
     userId: { type: Types.ObjectId, ref: 'User', required: true },
     versionId: { type: Types.ObjectId, ref: 'Version', required: true },
-    scope: { type: String, enum: ['site', 'global'], required: true },
-    host: { type: String, default: '' }, // the site host for scope='site'; '' for global
+    scope: { type: String, enum: ['page', 'site', 'global'], required: true },
+    host: { type: String, default: '' }, // host for scope page/site; '' for global
+    pageKey: { type: String, default: '' }, // exact page key for scope='page'; else ''
+    enabled: { type: Boolean, default: true }, // false = paused (kept, but not applied)
   },
   { timestamps: true },
 );
-// One active version per (user, scope, host): activating a new one replaces the old.
-activationSchema.index({ userId: 1, scope: 1, host: 1 }, { unique: true });
-// A version can't be activated twice by the same user.
+// A version can be activated at most once per user (toggling/removing keys off this).
 activationSchema.index({ userId: 1, versionId: 1 }, { unique: true });
+// Fast "what applies on this URL" lookups.
+activationSchema.index({ userId: 1, scope: 1, host: 1 });
+activationSchema.index({ userId: 1, scope: 1, pageKey: 1 });
 export const Activation = model('Activation', activationSchema);
 
 // --- Push subscriptions ---------------------------------------------------

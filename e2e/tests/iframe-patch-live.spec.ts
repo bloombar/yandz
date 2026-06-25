@@ -42,15 +42,22 @@ test('cross-origin iframe is patched independently as its own page', async ({}, 
       body: JSON.stringify({ email: `if_${rnd}@example.com`, password: 'password123', handle: `if_${rnd}` }),
     }),
   );
-  // A version for the IFRAME's URL only.
-  await fetch(`${API}/versions`, {
+  // A version for the IFRAME's URL only, which the viewer activates (opts in).
+  const created = await json(
+    await fetch(`${API}/versions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${su.token}` },
+      body: JSON.stringify({
+        url: IFRAME,
+        name: 'iframe change',
+        patches: [{ op: 'textReplace', target: { cssSelector: 'h1' }, payload: { from: ORIGINAL, to: 'IFRAMED' }, order: 0 }],
+      }),
+    }),
+  );
+  await fetch(`${API}/me/activations`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${su.token}` },
-    body: JSON.stringify({
-      url: IFRAME,
-      name: 'iframe change',
-      patches: [{ op: 'textReplace', target: { cssSelector: 'h1' }, payload: { from: ORIGINAL, to: 'IFRAMED' }, order: 0 }],
-    }),
+    body: JSON.stringify({ versionId: created.id }),
   });
 
   const ctx = await chromium.launchPersistentContext(testInfo.outputPath('profile'), {
@@ -59,9 +66,11 @@ test('cross-origin iframe is patched independently as its own page', async ({}, 
   });
   try {
     const sw = await getSW(ctx);
-    await sw.evaluate(async () => {
+    // Authenticate the SW as the viewer + grant consent so activations apply.
+    await sw.evaluate(async (t) => {
+      await (globalThis as any).chrome.storage.session.set({ token: t });
       await (globalThis as any).chrome.storage.local.set({ 'yandz:consent': 'granted' });
-    });
+    }, su.token);
 
     const page = await ctx.newPage();
     await page.goto(TOP, { waitUntil: 'domcontentloaded', timeout: 60_000 });

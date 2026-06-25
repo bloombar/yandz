@@ -81,8 +81,9 @@ test('windowed infinite scroll pages, dedupes, trims, and restores on scroll-up'
     const page = await ctx.newPage();
     await page.goto(`chrome-extension://${extId}/sidepanel.html`, { waitUntil: 'domcontentloaded' });
 
-    // Global tab (default off a non-web page) + "Mine" + "Latest" = exactly this fresh
-    // user's versions, newest first.
+    // Global tab + "Mine" = exactly this fresh user's (global-scoped) versions, newest
+    // first (the Mine filter is newest-first regardless of sort).
+    await page.locator('.tab', { hasText: 'Global' }).click();
     await page.locator('.pill', { hasText: 'Mine' }).click();
     const rows = page.locator('.version-row');
     const names = page.locator('.version-row .version-name');
