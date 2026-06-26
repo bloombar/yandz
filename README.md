@@ -1,62 +1,70 @@
 # Y and Z
 
-**Collaboratively remix any web page.** Y and Z is a browser extension that lets
-anyone visually modify the front-end of any web page — replace text, swap images,
-override CSS, change attributes, draw freehand, and annotate/highlight — and save
-those changes as structured **patches**. When another user with the extension visits
-the same URL, the patches are re-applied to their view. Many users can modify the same
-page, producing multiple ranked **versions** you can fork, vote on, and discuss.
+Collaboratively modify any web page.
 
-> ⚠️ **Trust & safety model — read this first.** Y and Z replays user-authored DOM
-> changes in other people's browsers on third-party sites. That is inherently a
-> content-injection surface. We mitigate it by design:
-> - **No arbitrary HTML injection** — only a fixed set of typed, whitelisted operations.
-> - **Sanitization on save (server) and before apply (client)** via DOMPurify + an
->   attribute/CSS whitelist.
-> - **One-time per-site consent** — pages are never silently modified on first visit;
->   the user opts in per origin before the top version auto-applies.
-> - **Moderation hooks** — author/date/lineage audit trail, reporting, rate limiting,
->   and image re-hosting through our own storage.
+`Y and Z` is a browser extension that lets anyone modify any web page.
+
+Replace text, swap images, restyle, annotate, and draw freehand on any page, then save your changes as a new **version**. Each version is scoped by its creator to a single **page**, a whole **site**, or **globally** (every site).
+
+Other users discover versions in scoped feeds, **opt in** to the ones they want, and those activated versions auto-apply on matching pages from then on. Many can layer at once — globals under site versions under page versions — and an "applied here" bar lets you toggle or remove each. The community votes on, discusses, and forks every version, creating a truly living Web.
+
+## Disclaimer
+
+> ⚠️ **Trust & safety model** Y and Z replays user-authored DOM changes in other people's browsers on third-party sites. That is inherently a content-injection surface. We mitigate it by design:
 >
-> Operating this publicly still carries real legal/abuse exposure (defacement,
-> phishing, defamation, IP/DMCA). A Terms of Service, takedown flow, and active
-> moderation are prerequisites for launch.
+> - **No arbitrary HTML injection** — only a fixed set of typed, whitelisted operations.
+> - **Sanitization on save (server) and before apply (client)** via DOMPurify + an attribute/CSS whitelist.
+> - **One-time global consent + per-version opt-in** — pages are never silently modified:
+>   the user grants consent once before Y and Z applies anything anywhere, and then
+>   explicitly activates each version they want applied (nothing auto-applies on its own).
+> - **Moderation hooks** — author/date/lineage audit trail, reporting, rate limiting, and image re-hosting through our own storage.
+>
+> Operating this publicly still carries real legal/abuse exposure (defacement, phishing, defamation, IP/DMCA). A Terms of Service, takedown flow, and active moderation are prerequisites for launch.
 
 ---
 
 ## How it works
 
 ```
- Edit (pick element → choose op)         Visit a modified page
-        │                                        │
-        ▼                                        ▼
- fingerprint element                    GET /pages?url=…  (block-filtered,
- build typed Patch  ── POST /versions ─▶  ranked for viewer)
- (sanitized)              │                       │
-                          ▼                       ▼
-                     MongoDB (metadata)    content script applies the top
-                     MinIO/S3 (images)     version's patches via the
+ Edit (pick element → choose op,          Visit a page (after consent)
+       set scope: page/site/global)               │
+        │                                          ▼
+        ▼                              GET /me/activations?url=…  (your active
+ fingerprint element                    versions relevant to this page:
+ build typed Patch  ── POST /versions ─▶ all globals + matching site + matching page)
+ (sanitized)              │                        │
+                          ▼                        ▼
+                     MongoDB (metadata)    content script LAYERS their patches
+                     MinIO/S3 (images)     (global < site < page) via the
                                            multi-strategy matcher (+ MutationObserver)
 ```
 
-A **Patch** targets a DOM element by a *multi-strategy fingerprint* (CSS selector →
+A **Patch** targets a DOM element by a _multi-strategy fingerprint_ (CSS selector →
 XPath → attribute fingerprint → text fingerprint → DOM path) so it survives page
-changes and SPAs. A **Version** is an ordered patch set; forking clones a version and
-records its parent for attribution.
+changes and SPAs. A **Version** is an ordered patch set with a **scope** (`page` /
+`site` / `global`) chosen by its creator; forking clones a version and records its
+parent for attribution.
+
+**Activation** is a per-user opt-in: a viewer activates the versions they want, and the
+content script applies every activated version relevant to the page they're on, layered
+by scope. A viewer can have many active versions of each scope; the "applied here" bar
+pauses or removes any of them. (`GET /pages?url=…` still serves a page's versions for
+discovery and the floating-icon count.)
 
 ## Architecture
 
 Monorepo with three npm workspaces:
 
-| Workspace | Stack | Responsibility |
-|-----------|-------|----------------|
-| `shared/` | TypeScript | Patch schema + sanitization whitelist, ranking math. Pure, 100%-covered. |
-| `server/` | Express · Mongoose · Socket.IO | REST API, auth, versions/votes/comments, social graph, presigned uploads, push fan-out, realtime rooms. |
-| `extension/` | WXT · React · TypeScript | One shared codebase building for **Chromium (MV3)** and **Firefox**. Content script (patch engine, floating icon, picker), background SW, side panel UI. |
+| Workspace    | Stack                          | Responsibility                                                                                                                                           |
+| ------------ | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shared/`    | TypeScript                     | Patch schema + sanitization whitelist, ranking math. Pure, 100%-covered.                                                                                 |
+| `server/`    | Express · Mongoose · Socket.IO | REST API, auth, versions/votes/comments, social graph, presigned uploads, push fan-out, realtime rooms.                                                  |
+| `extension/` | WXT · React · TypeScript       | One shared codebase building for **Chromium (MV3)** and **Firefox**. Content script (patch engine, floating icon, picker), background SW, side panel UI. |
 
 - **Element targeting:** `@medv/finder` (dynamic-class-stripped) + custom matcher cascade.
-- **Drawing:** `perfect-freehand` on an SVG overlay. **Icons:** `lucide-react`.
-- **Ranking:** Reddit "hot" (net votes + recency) **+ a per-viewer follow-boost**; Wilson score for the "Top" tab.
+- **Drawing & annotations:** `perfect-freehand` on an SVG overlay, anchored to a page element (positions stored as percentages so they track the element on scroll/resize). **Icons:** `lucide-react`.
+- **Feeds:** four tabs — **Latest** (page modifications everywhere), **This page**, **This site**, **Global** — each with All / Following / Mine / Bookmarked filters and a **Your feed** / **Latest** sort.
+- **Ranking:** "Your feed" blends Wilson vote-quality + a per-viewer follow-boost + bounded recency; "Latest" is strictly chronological. Applied within whichever scope feed you're viewing.
 - **Cross-browser:** a single shim, [`extension/lib/browser-surface.ts`](extension/lib/browser-surface.ts), isolates the only real divergence (Chromium `sidePanel` vs Firefox `sidebar_action`, push availability). No per-browser forks.
 
 ## Prerequisites
@@ -85,7 +93,7 @@ npm run dev:ext:firefox           # WXT dev build (Firefox)
 
 Then load the unpacked extension:
 
-- **Chromium (Chrome/Brave/Edge):** `chrome://extensions` → enable *Developer mode* →
+- **Chromium (Chrome/Brave/Edge):** `chrome://extensions` → enable _Developer mode_ →
   **Load unpacked** → select `extension/output/chrome-mv3` (dev build:
   `chrome-mv3-dev`).
 - **Firefox:** `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** →
@@ -101,8 +109,12 @@ WXT watches your source and pushes updates into the browser automatically, so yo
 load the extension **once**.
 
 ```bash
-# 1. (optional) Seed the dev DB with mock users, page versions, follows, votes.
-npm run seed --workspace=server     # 5 users (password: password123), 25 versions
+# 1. (optional) Seed the dev DB with mock data on real sites.
+npm run seed --workspace=server     # 5 users (password: password123); page/site/global
+                                    # versions across real pages; follows, votes,
+                                    # bookmarks, and a few activations
+# One-off: migrate legacy per-patch scope → per-version scope (dev DBs only).
+npm run migrate:scope --workspace=server
 
 # 2. Start the API (auto-restarts on change via tsx watch).
 npm run dev:server                  # http://localhost:4000
@@ -114,7 +126,7 @@ npm run dev:ext:firefox             # Firefox     → extension/output/firefox-m
 
 Load the **dev** build once (note the `-dev` suffix):
 
-- **Chromium:** `chrome://extensions` → *Developer mode* → **Load unpacked** →
+- **Chromium:** `chrome://extensions` → _Developer mode_ → **Load unpacked** →
   `extension/output/chrome-mv3-dev`.
 - **Firefox:** `npm run dev:ext:firefox` opens a browser with the add-on loaded
   automatically (via `web-ext`); no manual step needed.
@@ -125,14 +137,14 @@ Load the **dev** build once (note the `-dev` suffix):
 
 What reloads automatically once the dev server is running:
 
-| You change… | What happens |
-|-------------|--------------|
-| **Side panel / React UI** | Hot Module Replacement — updates live, no reload (React state is preserved). |
-| **Content script** (engine, picker, overlay) | WXT reloads the extension; **refresh the web page** so the new content script re-injects. |
-| **Background service worker** | WXT reloads the extension automatically. |
-| **`shared/` code** | Bundled into the extension — picked up by the watcher like any source. |
-| **API / `server/` code** | `tsx watch` restarts the server; no extension reload needed. |
-| **`wxt.config.ts` / manifest** (permissions, entrypoints, icons) | Needs a **manual reload** in `chrome://extensions` (the ↻ button), and occasionally a fresh *Load unpacked*. |
+| You change…                                                      | What happens                                                                                                 |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Side panel / React UI**                                        | Hot Module Replacement — updates live, no reload (React state is preserved).                                 |
+| **Content script** (engine, picker, overlay)                     | WXT reloads the extension; **refresh the web page** so the new content script re-injects.                    |
+| **Background service worker**                                    | WXT reloads the extension automatically.                                                                     |
+| **`shared/` code**                                               | Bundled into the extension — picked up by the watcher like any source.                                       |
+| **API / `server/` code**                                         | `tsx watch` restarts the server; no extension reload needed.                                                 |
+| **`wxt.config.ts` / manifest** (permissions, entrypoints, icons) | Needs a **manual reload** in `chrome://extensions` (the ↻ button), and occasionally a fresh _Load unpacked_. |
 
 The dev server keeps `VITE_API_BASE` pointed at `http://localhost:4000`; override it
 (and `VITE_GOOGLE_CLIENT_ID` / `VITE_VAPID_PUBLIC_KEY` for Google sign-in and push) in
