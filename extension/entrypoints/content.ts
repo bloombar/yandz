@@ -180,6 +180,10 @@ export default defineContentScript({
       version: ActiveItem;
       scope: Scope;
       on: boolean;
+      // Pulled in because an active version requires it (not a direct opt-in): the panel
+      // renders these read-only as "required by X".
+      dependency: boolean;
+      requiredBy: string | null;
     }
     let activeList: Active[] = [];
     // Editor draft, layered on TOP of everything while a version is being edited.
@@ -209,6 +213,8 @@ export default defineContentScript({
       name: string;
       author: { id: string; handle: string };
       on: boolean;
+      dependency: boolean;
+      requiredBy: string | null;
     }[] {
       return activeList.map((a) => ({
         scope: a.scope,
@@ -216,6 +222,8 @@ export default defineContentScript({
         name: a.version.name,
         author: { id: a.version.author.id, handle: a.version.author.handle },
         on: a.on,
+        dependency: a.dependency,
+        requiredBy: a.requiredBy,
       }));
     }
 
@@ -268,7 +276,13 @@ export default defineContentScript({
      *  any editor preview (a real refresh reflects the committed state). */
     async function refreshActivations(): Promise<void> {
       const items = await getActivations(location.href);
-      activeList = items.map((it) => ({ version: it, scope: it.scope as Scope, on: it.on }));
+      activeList = items.map((it) => ({
+        version: it,
+        scope: it.scope as Scope,
+        on: it.on,
+        dependency: !!it.dependency,
+        requiredBy: it.requiredBy ?? null,
+      }));
       preview = null;
       await reapplyAll();
     }
@@ -447,7 +461,13 @@ export default defineContentScript({
     } catch {
       return; // backend unreachable
     }
-    activeList = (await getActivations(location.href)).map((it) => ({ version: it, scope: it.scope as Scope, on: it.on }));
+    activeList = (await getActivations(location.href)).map((it) => ({
+      version: it,
+      scope: it.scope as Scope,
+      on: it.on,
+      dependency: !!it.dependency,
+      requiredBy: it.requiredBy ?? null,
+    }));
     if (isTop && data && data.versions.length > 0) {
       mountFloatingIcon({
         count: data.versions.length,

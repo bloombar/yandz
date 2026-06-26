@@ -18,6 +18,11 @@ export interface AppliedEntry {
   author: { id: string; handle: string };
   /** Enabled (applied) vs paused (kept in the list but not applied). */
   on: boolean;
+  /** True when applied only because an active version requires it. Such rows are
+   *  read-only — no toggle/remove — and captioned "required by X". */
+  dependency?: boolean;
+  /** Name of the version that pulled this one in (when `dependency`). */
+  requiredBy?: string | null;
 }
 
 const SCOPE_LABEL: Record<FeedScope, string> = { page: 'Page', site: 'Site', global: 'Global' };
@@ -39,7 +44,7 @@ export function AppliedBar({ applied, onToggle, onRemove, onDetails, onOpenProfi
     <div className="applied-bar">
       <span className="applied-bar-label muted">Applied here</span>
       {rows.map((e) => (
-        <div className={`applied-row ${e.on ? '' : 'off'}`} key={e.versionId}>
+        <div className={`applied-row ${e.on ? '' : 'off'} ${e.dependency ? 'dependency' : ''}`} key={e.versionId}>
           <span className={`scope-chip scope-${e.scope}`}>{SCOPE_LABEL[e.scope]}</span>
           <span className="applied-label">
             <span className="applied-name" role="button" title="View details" onClick={() => onDetails(e)}>
@@ -53,24 +58,31 @@ export function AppliedBar({ applied, onToggle, onRemove, onDetails, onOpenProfi
                 </span>
               </>
             )}
+            {/* Dependencies are applied automatically; show what pulled them in instead of controls. */}
+            {e.dependency && <span className="applied-required muted">required by {e.requiredBy || 'an active version'}</span>}
           </span>
-          <button
-            className="icon-btn applied-toggle"
-            aria-pressed={e.on}
-            aria-label={e.on ? `Pause ${e.name}` : `Resume ${e.name}`}
-            title={e.on ? 'Active — click to pause' : 'Paused — click to apply'}
-            onClick={() => onToggle(e)}
-          >
-            {e.on ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
-          </button>
-          <button
-            className="icon-btn applied-remove"
-            aria-label={`Remove ${e.name}`}
-            title="Remove from active versions"
-            onClick={() => onRemove(e)}
-          >
-            <X size={14} />
-          </button>
+          {/* Dependency rows are read-only: the requiring version controls them. */}
+          {!e.dependency && (
+            <>
+              <button
+                className="icon-btn applied-toggle"
+                aria-pressed={e.on}
+                aria-label={e.on ? `Pause ${e.name}` : `Resume ${e.name}`}
+                title={e.on ? 'Active — click to pause' : 'Paused — click to apply'}
+                onClick={() => onToggle(e)}
+              >
+                {e.on ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
+              </button>
+              <button
+                className="icon-btn applied-remove"
+                aria-label={`Remove ${e.name}`}
+                title="Remove from active versions"
+                onClick={() => onRemove(e)}
+              >
+                <X size={14} />
+              </button>
+            </>
+          )}
         </div>
       ))}
     </div>

@@ -126,8 +126,9 @@ export function App(): React.JSX.Element {
   const push = (v: View) => setStack((s) => [...s, v]);
   const close = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
 
-  // Only ENABLED activations highlight their feed row as applied.
-  const appliedIds = new Set(applied.filter((a) => a.on).map((a) => a.versionId));
+  // Only ENABLED, directly-activated versions highlight their feed row as applied — a
+  // version pulled in as a dependency isn't something the viewer opted into.
+  const appliedIds = new Set(applied.filter((a) => a.on && !a.dependency).map((a) => a.versionId));
   const currentHost = isWebUrl(url) ? hostOf(url!) : null;
 
   /** Message the content script in the active tab; false if unreachable. */
@@ -344,6 +345,7 @@ export function App(): React.JSX.Element {
 
   /** Bar toggle: pause/resume an activation, keeping it in the list. */
   const onToggle = (e: AppliedEntry) => {
+    if (e.dependency) return; // dependency rows are read-only — the requiring version controls them
     const next = !e.on;
     setApplied((xs) => xs.map((a) => (a.versionId === e.versionId ? { ...a, on: next } : a)));
     void Api.setActivationEnabled(e.versionId, next).catch(() => {});
@@ -352,6 +354,7 @@ export function App(): React.JSX.Element {
 
   /** Bar ✕: remove the activation entirely. */
   const onRemove = (e: AppliedEntry) => {
+    if (e.dependency) return; // can't remove a dependency directly; remove the version that requires it
     setApplied((xs) => xs.filter((a) => a.versionId !== e.versionId));
     setAppliedItems((xs) => xs.filter((x) => x.id !== e.versionId));
     void Api.removeActivation(e.versionId).catch(() => {});
@@ -619,6 +622,9 @@ export function App(): React.JSX.Element {
           baseName={view.baseName}
           initialTab={view.initialTab}
           initialTool={view.initialTool}
+          activeVersions={applied
+            .filter((a) => a.on && !a.dependency)
+            .map((a) => ({ id: a.versionId, name: a.name, scope: a.scope as VersionScope }))}
           messageTab={messageTab}
           onSaved={async (newId) => {
             // Activate the just-saved version so the author sees it applied, then refresh.

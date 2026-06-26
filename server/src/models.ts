@@ -75,6 +75,8 @@ const versionSchema = new Schema(
     patches: { type: [patchSchema], default: [] },
     parentVersionId: { type: Types.ObjectId, ref: 'Version', default: null },
     rootVersionId: { type: Types.ObjectId, ref: 'Version', default: null },
+    // Other versions bundled + applied together with this one (equal-or-broader scope).
+    dependencies: { type: [Types.ObjectId], ref: 'Version', default: [] },
     // Application scope, set by the creator. 'page' applies only on this version's page;
     // 'site' across the whole host; 'global' on every site. `host` is the denormalized
     // host of the version's page (hostOf(page.urlKey)), so site-scoped feeds/activations

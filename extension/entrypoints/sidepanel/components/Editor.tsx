@@ -31,6 +31,20 @@ import type { AnyPatch, ElementTarget, DrawingStroke, VersionScope, TemplateMode
 /** Auto-save lifecycle, surfaced as discrete status text near the Done button. */
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
+/** Scope breadth, for the dependency eligibility rule (a version may depend only on
+ *  versions of equal-or-broader scope: page→page/site/global, site→site/global, etc.). */
+const SCOPE_RANK: Record<VersionScope, number> = { page: 0, site: 1, global: 2 };
+
+/** Merge resolved dependency descriptors into a candidate list, de-duping by id. */
+function mergeDepCandidates(
+  cur: { id: string; name: string; scope: VersionScope }[],
+  incoming: { id: string; name: string; scope: VersionScope }[],
+): { id: string; name: string; scope: VersionScope }[] {
+  const byId = new Map(cur.map((c) => [c.id, c]));
+  for (const d of incoming) if (!byId.has(d.id)) byId.set(d.id, d);
+  return [...byId.values()];
+}
+
 interface PickedMessage {
   type: 'yandz:element-picked';
   target: ElementTarget;
@@ -79,6 +93,9 @@ interface Props {
   initialTab?: VersionTab;
   /** Tool to auto-start on mount, when launched from a top-nav tool icon. */
   initialTool?: 'pick' | 'draw' | 'style';
+  /** The viewer's currently-active versions (enabled, non-dependency), offered as
+   *  candidate dependencies to bundle with this one. The currently-applied base is here. */
+  activeVersions?: { id: string; name: string; scope: VersionScope }[];
   /** Returns false when the content script isn't reachable on the active tab. */
   messageTab: (payload: unknown) => Promise<boolean>;
   /** Called with the new version's id and chosen scope after a successful save. */
@@ -100,6 +117,7 @@ export function Editor({
   baseName,
   initialTab = 'changes',
   initialTool,
+  activeVersions = [],
   messageTab,
   onSaved,
   onClose,
@@ -113,6 +131,18 @@ export function Editor({
   const [draftName, setDraftName] = useState('');
   // The whole version's application scope, chosen by its creator.
   const [scope, setScope] = useState<VersionScope>(editScope ?? 'page');
+  // Other versions bundled + applied together with this one. Candidates come from the
+  // viewer's currently-active versions (the base is one of them) plus any the base/own
+  // version already declares; only those at an equal-or-broader scope are eligible.
+  const [depCandidates, setDepCandidates] = useState<{ id: string; name: string; scope: VersionScope }[]>(() =>
+    activeVersions.filter((v) => v.id !== editVersionId).map((v) => ({ id: v.id, name: v.name, scope: v.scope })),
+  );
+  // Pre-select every eligible active version by default (editable below).
+  const [dependencies, setDependencies] = useState<string[]>(() =>
+    activeVersions
+      .filter((v) => v.id !== editVersionId && SCOPE_RANK[v.scope] >= SCOPE_RANK[editScope ?? 'page'])
+      .map((v) => v.id),
+  );
   const [tab, setTab] = useState<VersionTab>(initialTab);
   // The saved version id (reactive mirror of versionIdRef) for the Comments tab.
   const [savedVersionId, setSavedVersionId] = useState<string | null>(editVersionId ?? null);
@@ -141,15 +171,31 @@ export function Editor({
   const patchesRef = useRef(patches);
   const nameRef = useRef(name);
   const scopeRef = useRef(scope);
+  const dependenciesRef = useRef(dependencies);
   const dirtyRef = useRef(false); // true once the user makes an edit (gates auto-save)
   patchesRef.current = patches;
   nameRef.current = name;
   scopeRef.current = scope;
+  dependenciesRef.current = dependencies;
 
-  /** Change the version's scope (this page / this site / global); auto-saves like any edit. */
+  /** Change the version's scope (this page / this site / global); auto-saves like any edit.
+   *  Widening the scope drops any selected dependency that's now too narrow (a page-scoped
+   *  dependency can't ride along on a site/global version). */
   const changeScope = (next: VersionScope) => {
     dirtyRef.current = true;
     setScope(next);
+    setDependencies((cur) =>
+      cur.filter((id) => {
+        const c = depCandidates.find((d) => d.id === id);
+        return !c || SCOPE_RANK[c.scope] >= SCOPE_RANK[next];
+      }),
+    );
+  };
+
+  /** Toggle whether a candidate version is bundled as a dependency. */
+  const toggleDependency = (id: string) => {
+    dirtyRef.current = true;
+    setDependencies((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   };
 
   const addPatch = (p: Omit<AnyPatch, 'order'>) => {
@@ -183,15 +229,34 @@ export function Editor({
     commit(next);
   };
 
-  // Preload the patches we're building on: the user's own version (to keep adding
-  // to it) or another user's version (as the base for a derivative). Not a user
-  // edit → not marked dirty, so it doesn't trigger a redundant save.
+  // Preload only when editing the viewer's OWN version: load its patches to keep editing
+  // it in place, and adopt its declared dependencies (authoritative). A NEW or DERIVED
+  // version starts EMPTY and copies NOTHING — the previously-applied versions (including
+  // the base being remixed) become dependencies instead, so their changes apply via the
+  // bundle exactly once rather than being duplicated into this version. Not a user edit →
+  // not marked dirty, so it doesn't trigger a redundant save.
   useEffect(() => {
-    const preloadId = editVersionId ?? baseVersionId;
-    if (!preloadId) return;
-    void Api.getVersion(preloadId)
-      .then((v) => setPatches(v.patches.map((p, i) => ({ ...p, order: i }))))
-      .catch(() => {});
+    if (editVersionId) {
+      void Api.getVersion(editVersionId)
+        .then((v) => {
+          setPatches(v.patches.map((p, i) => ({ ...p, order: i })));
+          const deps = v.dependencies ?? [];
+          setDepCandidates((cur) => mergeDepCandidates(cur, deps));
+          setDependencies(deps.map((d) => d.id)); // the version's stored deps are authoritative
+        })
+        .catch(() => {});
+    } else if (baseVersionId) {
+      // Inherit the base's declared dependencies (without copying its patches).
+      void Api.getVersion(baseVersionId)
+        .then((v) => {
+          const deps = v.dependencies ?? [];
+          if (!deps.length) return;
+          setDepCandidates((cur) => mergeDepCandidates(cur, deps));
+          setDependencies((cur) => [...new Set([...cur, ...deps.map((d) => d.id)])]);
+        })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editVersionId, baseVersionId]);
 
   // Auto-start the tool the user launched from the top nav.
@@ -225,17 +290,18 @@ export function Editor({
       // random two-word name otherwise.
       const vName = nameRef.current.trim() || undefined;
       const vScope = scopeRef.current;
+      const vDeps = dependenciesRef.current;
       if (versionIdRef.current == null) {
         const res = baseVersionId
-          ? await Api.forkVersion(baseVersionId, { url, title: pageTitle, name: vName, patches: patchSet, scope: vScope })
-          : await Api.createVersion({ url, title: pageTitle, name: vName, patches: patchSet, scope: vScope });
+          ? await Api.forkVersion(baseVersionId, { url, title: pageTitle, name: vName, patches: patchSet, scope: vScope, dependencies: vDeps })
+          : await Api.createVersion({ url, title: pageTitle, name: vName, patches: patchSet, scope: vScope, dependencies: vDeps });
         versionIdRef.current = res.id;
         setSavedVersionId(res.id); // enable the Comments tab now the version exists
         // Show the server's (possibly auto-generated) name so the user can see and
         // edit it. Doesn't mark dirty, so it won't trigger another save by itself.
         if (!nameRef.current.trim() && res.name) setName(res.name);
       } else {
-        await Api.updateVersion(versionIdRef.current, { name: vName, patches: patchSet, scope: vScope });
+        await Api.updateVersion(versionIdRef.current, { name: vName, patches: patchSet, scope: vScope, dependencies: vDeps });
       }
       setLastSavedAt(Date.now());
       setStatus('saved');
@@ -259,7 +325,7 @@ export function Editor({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [patches, name, scope, persist]);
+  }, [patches, name, scope, dependencies, persist]);
 
   /** Finish editing: flush any pending save, then return to the list with the
    *  version selected (or just close if nothing was ever saved). */
@@ -448,6 +514,34 @@ export function Editor({
                   : 'Others can opt in to apply it on every site.'}
             </p>
           </div>
+
+          {/* Dependencies: other active versions to bundle + apply together with this one.
+              Only versions of equal-or-broader scope are eligible. */}
+          {(() => {
+            const eligible = depCandidates.filter((d) => SCOPE_RANK[d.scope] >= SCOPE_RANK[scope]);
+            if (eligible.length === 0) return null;
+            return (
+              <div className="field dependencies-field">
+                <label>Bundle with</label>
+                <p className="field-hint muted" style={{ marginTop: 0 }}>
+                  These versions are applied together with yours whenever someone uses it.
+                </p>
+                {eligible.map((d) => (
+                  <label className="dependency-option" key={d.id}>
+                    <input
+                      type="checkbox"
+                      checked={dependencies.includes(d.id)}
+                      onChange={() => toggleDependency(d.id)}
+                    />
+                    <span className={`scope-chip scope-${d.scope}`}>
+                      {d.scope === 'page' ? 'Page' : d.scope === 'site' ? 'Site' : 'Global'}
+                    </span>
+                    <span className="dependency-name">{d.name}</span>
+                  </label>
+                ))}
+              </div>
+            );
+          })()}
           <p className="muted" style={{ marginTop: 0 }}>
             Use the select-element and draw tools in the top bar to make changes; they auto-save.
           </p>

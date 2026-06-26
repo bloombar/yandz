@@ -38,7 +38,35 @@ const createSchema = z.object({
   patches: z.array(patchInput).min(1),
   parentVersionId: z.string().optional(),
   scope: scopeInput.optional(),
+  dependencies: z.array(z.string()).max(25).optional(),
 });
+
+/** Scope precedence: a version may only depend on equal-or-broader scope. */
+const SCOPE_RANK: Record<string, number> = { page: 0, site: 1, global: 2 };
+
+/**
+ * Validate a version's declared dependencies: real versions, no self-dependency, and
+ * each at least as broad in scope as the depending version. Returns the resolved ids.
+ */
+async function validateDependencies(
+  depIds: string[] | undefined,
+  effectiveScope: 'page' | 'site' | 'global',
+  selfId?: Types.ObjectId | string,
+): Promise<{ ok: true; ids: Types.ObjectId[] } | { ok: false; reason: string }> {
+  if (!depIds || depIds.length === 0) return { ok: true, ids: [] };
+  const unique = [...new Set(depIds)];
+  if (unique.some((id) => !Types.ObjectId.isValid(id))) return { ok: false, reason: 'bad dependency id' };
+  if (selfId && unique.includes(String(selfId))) return { ok: false, reason: 'self-dependency' };
+  const found = await Version.find({ _id: { $in: unique } }).select('scope').lean();
+  if (found.length !== unique.length) return { ok: false, reason: 'unknown dependency' };
+  const ownRank = SCOPE_RANK[effectiveScope] ?? 0;
+  for (const d of found) {
+    if ((SCOPE_RANK[d.scope ?? 'page'] ?? 0) < ownRank) {
+      return { ok: false, reason: `dependency scope '${d.scope}' is narrower than '${effectiveScope}'` };
+    }
+  }
+  return { ok: true, ids: unique.map((id) => new Types.ObjectId(id)) };
+}
 
 /** Find or create the Page row for a URL, returning its id + urlKey. */
 async function upsertPage(url: string, title?: string): Promise<{ id: Types.ObjectId; urlKey: string }> {
@@ -73,6 +101,12 @@ async function createVersion(
     return;
   }
 
+  const deps = await validateDependencies(body.data.dependencies, body.data.scope ?? 'page');
+  if (!deps.ok) {
+    res.status(400).json({ error: 'invalid dependencies', reason: deps.reason });
+    return;
+  }
+
   const { id: pageId, urlKey } = await upsertPage(body.data.url, body.data.title);
   const created = await Version.create({
     pageId,
@@ -87,6 +121,7 @@ async function createVersion(
     // so site-scoped feeds/activations resolve in one indexed query.
     scope: body.data.scope ?? 'page',
     host: hostOf(urlKey),
+    dependencies: deps.ids,
     urlMatch: { mode: 'exact', value: urlKey },
   });
   if (!created.rootVersionId) {
@@ -155,13 +190,14 @@ versionsRouter.put('/:id', requireAuth, async (req, res) => {
     name: z.string().max(120).optional(),
     patches: z.array(patchInput).min(1),
     scope: scopeInput.optional(),
+    dependencies: z.array(z.string()).max(25).optional(),
   });
   const body = updateSchema.safeParse(req.body);
   if (!body.success) {
     res.status(400).json({ error: 'invalid input', details: body.error.flatten() });
     return;
   }
-  const version = await Version.findById(req.params.id).select('authorId scope');
+  const version = await Version.findById(req.params.id).select('authorId scope dependencies');
   if (!version) {
     res.status(404).json({ error: 'not found' });
     return;
@@ -177,6 +213,15 @@ versionsRouter.put('/:id', requireAuth, async (req, res) => {
     res.status(422).json({ error: 'patch rejected', reason: clean.reason });
     return;
   }
+  // Validate dependencies against the EFFECTIVE scope/dep-set: widening scope re-checks
+  // the existing deps (a page-dep becomes invalid once the version is global).
+  const effectiveScope = body.data.scope ?? (version.scope as 'page' | 'site' | 'global');
+  const effectiveDeps = body.data.dependencies ?? (version.dependencies ?? []).map(String);
+  const deps = await validateDependencies(effectiveDeps, effectiveScope, version._id as Types.ObjectId);
+  if (!deps.ok) {
+    res.status(400).json({ error: 'invalid dependencies', reason: deps.reason });
+    return;
+  }
   await Version.updateOne(
     { _id: version._id },
     {
@@ -184,6 +229,7 @@ versionsRouter.put('/:id', requireAuth, async (req, res) => {
         patches: clean.patches,
         ...(body.data.name ? { name: body.data.name } : {}),
         ...(body.data.scope ? { scope: body.data.scope } : {}),
+        ...(body.data.dependencies !== undefined ? { dependencies: deps.ids } : {}),
       },
     },
   );
@@ -206,12 +252,17 @@ versionsRouter.get('/:id', async (req, res) => {
     res.status(404).json({ error: 'not found' });
     return;
   }
+  // Resolve dependencies for the editor (skip any whose Version was deleted).
+  const depDocs = v.dependencies?.length
+    ? await Version.find({ _id: { $in: v.dependencies } }).select('name scope').lean()
+    : [];
   res.json({
     id: String(v._id),
     name: v.name,
     authorId: String(v.authorId),
     patches: v.patches,
     scope: v.scope ?? 'page',
+    dependencies: depDocs.map((d) => ({ id: String(d._id), name: d.name, scope: d.scope ?? 'page' })),
     parentVersionId: v.parentVersionId ? String(v.parentVersionId) : null,
     rootVersionId: v.rootVersionId ? String(v.rootVersionId) : null,
     up: v.up,

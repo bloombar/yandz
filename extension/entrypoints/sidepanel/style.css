@@ -33,6 +33,9 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .applied-row.off .applied-toggle { color: #8889; }
 .applied-remove { color: #8889; }
 .applied-remove:hover { color: #e74c3c; }
+/* A dependency row is applied automatically (no controls); show what requires it. */
+.applied-row.dependency { opacity: 0.8; }
+.applied-required { margin-left: 6px; font-size: 11px; font-style: italic; }
 /* "Apply to all instances" control under an expanded change. */
 .template-control { display: flex; flex-direction: column; gap: 6px; padding: 6px 0 2px; font-size: 12px; }
 /* Scope chip (Page / Site / Global). */
@@ -40,6 +43,10 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .scope-chip.scope-page { background: #4c9ffe; }
 .scope-chip.scope-site { background: #2f9e44; }
 .scope-chip.scope-global { background: #9c36b5; }
+/* Dependencies picker in the editor: checkbox + scope chip + version name per row. */
+.dependency-option { display: flex; align-items: center; gap: 6px; padding: 3px 0; cursor: pointer; font-size: 13px; }
+.dependency-option input { margin: 0; }
+.dependency-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Infinite-scroll loading sentinel (top/bottom of the windowed list). */
 .feed-sentinel { text-align: center; padding: 10px 12px; font-size: 12px; }
 /* Settings → Site-specific changes: collapsible per-site groups. */
@@ -122,7 +129,7 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 /* Page title — unstyled plain text (clickable to apply, but not link-like). */
 .page-link { color: inherit; cursor: pointer; }
 /* Site favicon shown before a page/site version's title. */
-.favicon { width: 14px; height: 14px; vertical-align: middle; border-radius: 2px; }
+.favicon { width: 14px; height: 14px; vertical-align: middle; border-radius: 2px; margin-right: 5px; }
 /* Secondary line: version name (link-like) + URL (muted). Both clickable to apply. */
 .vr-sub, .page-ref { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .version-name { color: #4c9ffe; cursor: pointer; }

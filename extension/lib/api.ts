@@ -48,6 +48,11 @@ export interface FeedItem extends VersionSummary {
 /** An activated version: a feed item plus whether it's currently enabled (applied). */
 export interface ActiveItem extends FeedItem {
   on: boolean;
+  /** True when this version is applied only because an active version declares it a
+   *  dependency (not a direct opt-in). Such entries are read-only in the applied bar. */
+  dependency?: boolean;
+  /** Name of the version that pulled this one in as a dependency (for "required by X"). */
+  requiredBy?: string | null;
 }
 
 export interface FeedResult {
@@ -184,21 +189,44 @@ export const Api = {
 
   // A single version (used to preload a base when starting an attributed derivative).
   getVersion: (id: string) =>
-    api<{ id: string; name: string; authorId: string; patches: AnyPatch[]; scope: VersionScope; parentVersionId: string | null }>(
-      `/versions/${id}`,
-    ),
+    api<{
+      id: string;
+      name: string;
+      authorId: string;
+      patches: AnyPatch[];
+      scope: VersionScope;
+      /** Versions this one bundles + applies together, resolved to display info. */
+      dependencies?: { id: string; name: string; scope: VersionScope }[];
+      parentVersionId: string | null;
+    }>(`/versions/${id}`),
 
-  createVersion: (input: { url: string; title?: string; name?: string; patches: AnyPatch[]; scope?: VersionScope }) =>
-    api<{ id: string; name: string }>('/versions', { method: 'POST', body: JSON.stringify(input) }),
+  createVersion: (input: {
+    url: string;
+    title?: string;
+    name?: string;
+    patches: AnyPatch[];
+    scope?: VersionScope;
+    dependencies?: string[];
+  }) => api<{ id: string; name: string }>('/versions', { method: 'POST', body: JSON.stringify(input) }),
 
-  forkVersion: (id: string, input: { url: string; title?: string; name?: string; patches: AnyPatch[]; scope?: VersionScope }) =>
+  forkVersion: (
+    id: string,
+    input: {
+      url: string;
+      title?: string;
+      name?: string;
+      patches: AnyPatch[];
+      scope?: VersionScope;
+      dependencies?: string[];
+    },
+  ) =>
     api<{ id: string; name: string; parentVersionId: string }>(`/versions/${id}/fork`, {
       method: 'POST',
       body: JSON.stringify(input),
     }),
 
   // Replace an existing version's patch set (used by debounced auto-save).
-  updateVersion: (id: string, input: { name?: string; patches: AnyPatch[]; scope?: VersionScope }) =>
+  updateVersion: (id: string, input: { name?: string; patches: AnyPatch[]; scope?: VersionScope; dependencies?: string[] }) =>
     api<{ id: string }>(`/versions/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
 
   // Delete a version the viewer authored.
