@@ -28,8 +28,10 @@ interface Props {
   onOpenComments: (version: FeedItem) => void;
   onOpenChanges: (version: FeedItem) => void;
   onOpenDetails: (version: FeedItem) => void;
-  /** Apply (page) or activate (site/global) a version — same handler as the feed. */
+  /** Toggle a version active/inactive — same handler as the feed. */
   onApply: (version: FeedItem) => void;
+  /** Whether a version is currently active here (drives the row's active highlight). */
+  isActive?: (versionId: string) => boolean;
 }
 
 /** The lowercased host of a normalized urlKey, or '' if unparseable. */
@@ -52,6 +54,7 @@ export function Profile({
   onOpenChanges,
   onOpenDetails,
   onApply,
+  isActive,
 }: Props): React.JSX.Element {
   const [data, setData] = useState<ProfileData | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -160,6 +163,7 @@ export function Profile({
         <VersionRow
           key={v.id}
           version={v}
+          active={isActive?.(v.id) ?? false}
           currentUserId={currentUserId}
           onApply={onApply}
           onVote={onVote}

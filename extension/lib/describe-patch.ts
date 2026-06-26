@@ -6,8 +6,8 @@ import type { AnyPatch } from '@yandz/shared';
 
 export const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}…` : s);
 
-/** A text preview for text edits, or a short description of the operation. */
-export function describePatch(p: AnyPatch): string {
+/** The base operation label (before any template suffix). */
+function baseLabel(p: AnyPatch): string {
   switch (p.op) {
     case 'textReplace':
       return `Text: “${clip(p.payload.to ?? '', 40)}”`;
@@ -24,4 +24,10 @@ export function describePatch(p: AnyPatch): string {
     default:
       return (p as AnyPatch).op;
   }
+}
+
+/** A text preview for text edits, or a short description of the operation. Appends a
+ *  marker when the change applies to all instances of the same template. */
+export function describePatch(p: AnyPatch): string {
+  return p.template ? `${baseLabel(p)} · all instances` : baseLabel(p);
 }

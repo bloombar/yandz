@@ -44,6 +44,9 @@ const elementTargetSchema = new Schema(
       wPct: Number,
       hPct: Number,
     },
+    // Immutable originals for the "apply to all instances" content gate.
+    ownText: String,
+    classSig: String,
   },
   { _id: false },
 );
@@ -58,6 +61,8 @@ const patchSchema = new Schema(
     target: { type: elementTargetSchema, required: true },
     payload: { type: Schema.Types.Mixed, required: true },
     order: { type: Number, required: true },
+    // Apply to all instances of the same template (see shared TemplateMode); absent = one element.
+    template: { type: String, enum: ['auto', 'text', 'styles', 'both'] },
   },
   { _id: false },
 );

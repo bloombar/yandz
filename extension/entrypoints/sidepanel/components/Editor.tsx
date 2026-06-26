@@ -26,7 +26,7 @@ import { PanelHeader } from './PanelHeader.js';
 import { PanelTabs, type VersionTab } from './PanelTabs.js';
 import { CommentBoard } from './CommentBoard.js';
 import { ChangeItem } from './ChangeItem.js';
-import type { AnyPatch, ElementTarget, DrawingStroke, VersionScope } from '@yandz/shared';
+import type { AnyPatch, ElementTarget, DrawingStroke, VersionScope, TemplateMode } from '@yandz/shared';
 
 /** Auto-save lifecycle, surfaced as discrete status text near the Done button. */
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
@@ -170,6 +170,17 @@ export function Editor({
     dirtyRef.current = true;
     setPatches(next);
     void messageTab({ type: 'yandz:apply-patches', patches: next });
+  };
+
+  /** Set/clear whether a change applies to all instances of the same template, and
+   *  re-preview so the change spreads/contracts live. */
+  const setPatchTemplate = (index: number, mode: TemplateMode | undefined) => {
+    const next = patchesRef.current.map((p, i) => {
+      if (i !== index) return p;
+      const { template: _drop, ...rest } = p as AnyPatch & { template?: TemplateMode };
+      return (mode ? { ...rest, template: mode } : rest) as AnyPatch;
+    });
+    commit(next);
   };
 
   // Preload the patches we're building on: the user's own version (to keep adding
@@ -479,6 +490,7 @@ export function Editor({
                 patch={p}
                 onHighlight={() => void messageTab({ type: 'yandz:highlight-element', target: p.target })}
                 onDelete={() => removePatch(i)}
+                onTemplate={(mode) => setPatchTemplate(i, mode)}
               />
             ))}
           {patches.length === 0 && (

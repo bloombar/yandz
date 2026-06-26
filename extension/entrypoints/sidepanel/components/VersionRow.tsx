@@ -49,6 +49,11 @@ function hostOf(urlKey: string): string {
   }
 }
 
+/** A small favicon for the version's site (Google's favicon service, reliable for img). */
+function faviconUrl(urlKey: string): string {
+  return `https://www.google.com/s2/favicons?sz=32&domain=${encodeURIComponent(hostOf(urlKey))}`;
+}
+
 const SCOPE_LABEL = { page: 'Page', site: 'Site', global: 'Global' } as const;
 
 /**
@@ -117,11 +122,22 @@ export function VersionRow({
 
       {/* The rest of the item (stacked lines), to the right of the vote rail. */}
       <div className="vr-body">
-      {/* Top line: scope chip + where-it-applies (prominent) + comment/bookmark/share. */}
+      {/* Top line: favicon + where-it-applies (prominent) + comment/bookmark/share. The
+          scope pill lives below the byline (see bottom line). */}
       <div className="vr-line">
         <div className="page-link" aria-pressed={active}>
           {active && <Check size={12} style={{ verticalAlign: 'middle' }} />}{' '}
-          <span className={`scope-chip scope-${v.scope}`}>{SCOPE_LABEL[v.scope]}</span> {applies.headline}
+          {/* Page/site versions belong to a specific site → show its favicon. */}
+          {v.scope !== 'global' && (
+            <img
+              className="favicon"
+              src={faviconUrl(v.page.urlKey)}
+              alt=""
+              loading="lazy"
+              onError={(e) => (e.currentTarget.style.display = 'none')}
+            />
+          )}
+          {applies.headline}
         </div>
         <div className="row-actions">
           <button className="icon-btn" title="Comments" onClick={stop(() => onOpenComments(v))}>
@@ -164,23 +180,27 @@ export function VersionRow({
         </span>
       </div>
 
-      {/* Bottom line: author/date (left) + "see details" (right). */}
+      {/* Bottom line: author/date + scope pill (left, stacked) + "see details" (right). */}
       <div className="vr-line">
-        <div className="muted">
-          <span className="handle" onClick={stop(() => onOpenProfile(v.author.id))}>
-            u/{v.author.handle}
-          </span>{' '}
-          · {new Date(v.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
-          {v.parentAuthor && (
-            <>
-              {' '}
-              · <GitFork size={11} style={{ verticalAlign: 'middle' }} /> based on{' '}
-              <span className="handle" onClick={stop(() => onOpenProfile(v.parentAuthor!.id))}>
-                u/{v.parentAuthor.handle}
-              </span>
-              ’s
-            </>
-          )}
+        <div className="vr-byline">
+          <div className="muted">
+            <span className="handle" onClick={stop(() => onOpenProfile(v.author.id))}>
+              u/{v.author.handle}
+            </span>{' '}
+            · {new Date(v.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+            {v.parentAuthor && (
+              <>
+                {' '}
+                · <GitFork size={11} style={{ verticalAlign: 'middle' }} /> based on{' '}
+                <span className="handle" onClick={stop(() => onOpenProfile(v.parentAuthor!.id))}>
+                  u/{v.parentAuthor.handle}
+                </span>
+                ’s
+              </>
+            )}
+          </div>
+          {/* The Page / Site / Global pill, moved here from the title line. */}
+          <span className={`scope-chip scope-${v.scope}`}>{SCOPE_LABEL[v.scope]}</span>
         </div>
         {/* Revealed on row hover; opens the details panel (smart default tab). */}
         <span className="see-details" role="button" title="See details" onClick={stop(() => onOpenDetails(v))}>

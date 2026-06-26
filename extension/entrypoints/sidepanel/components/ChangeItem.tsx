@@ -6,7 +6,7 @@
  */
 import React, { useState } from 'react';
 import { Trash2 } from 'lucide-react';
-import type { AnyPatch } from '@yandz/shared';
+import type { AnyPatch, TemplateMode } from '@yandz/shared';
 import { describePatch } from '../../../lib/describe-patch.js';
 
 /** Expanded before/after (or settings) detail for a change. */
@@ -69,10 +69,13 @@ export function ChangeItem({
   patch,
   onHighlight,
   onDelete,
+  onTemplate,
 }: {
   patch: AnyPatch;
   onHighlight: () => void;
   onDelete?: () => void;
+  /** Editor-only: set/clear whether this change applies to all template instances. */
+  onTemplate?: (mode: TemplateMode | undefined) => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
   return (
@@ -96,7 +99,37 @@ export function ChangeItem({
           </button>
         )}
       </div>
-      {open && <ChangeDetails patch={patch} />}
+      {open && (
+        <>
+          <ChangeDetails patch={patch} />
+          {/* Editor-only: apply this change to every instance of the same template. */}
+          {onTemplate && (
+            <div className="template-control">
+              <label className="row" style={{ gap: 6, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={patch.template !== undefined}
+                  onChange={(e) => onTemplate(e.target.checked ? 'auto' : undefined)}
+                />
+                <span>Apply to all matching instances</span>
+              </label>
+              {patch.template !== undefined && (
+                <select
+                  className="sort-select"
+                  aria-label="Which instances to match"
+                  value={patch.template}
+                  onChange={(e) => onTemplate(e.target.value as TemplateMode)}
+                >
+                  <option value="auto">Auto (by change type)</option>
+                  <option value="text">Same text</option>
+                  <option value="styles">Same styles &amp; attributes</option>
+                  <option value="both">Same text + styles</option>
+                </select>
+              )}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

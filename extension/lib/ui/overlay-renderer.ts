@@ -6,7 +6,7 @@
  * so it tracks responsive layouts.
  */
 import { getStroke } from 'perfect-freehand';
-import { matchTarget } from '../engine/matcher.js';
+import { matchTarget, matchTemplate } from '../engine/matcher.js';
 import type { AnyPatch, DrawingStroke, ElementTarget } from '@yandz/shared';
 
 const LAYER_ID = 'yandz-overlay-layer';
@@ -70,19 +70,29 @@ export class OverlayRenderer {
     this.layer = layer;
   }
 
-  /** Redraw all visual patches at current layout positions. */
+  /** Anchor rect(s) for a patch — one per template instance, else the single anchor. */
+  private rectsFor(patch: AnyPatch): DOMRect[] {
+    if (patch.template) {
+      const els = matchTemplate(patch, document);
+      if (els.length) return els.map((el) => el.getBoundingClientRect());
+    }
+    return [anchorRect(patch.target)];
+  }
+
+  /** Redraw all visual patches at current layout positions (one per template instance). */
   private draw(): void {
     if (!this.layer) return;
     this.layer.replaceChildren();
     for (const patch of this.patches) {
-      if (patch.op === 'drawingOverlay') this.drawStrokes(patch.target, patch.payload.strokes);
-      else if (patch.op === 'annotation') this.drawAnnotation(patch);
+      if (patch.op === 'drawingOverlay')
+        for (const rect of this.rectsFor(patch)) this.drawStrokesAt(rect, patch.payload.strokes);
+      else if (patch.op === 'annotation')
+        for (const rect of this.rectsFor(patch)) this.drawAnnotationAt(rect, patch);
     }
   }
 
-  /** Render freehand strokes positioned relative to the anchor box. */
-  private drawStrokes(target: ElementTarget, strokes: DrawingStroke[]): void {
-    const rect = anchorRect(target);
+  /** Render freehand strokes positioned relative to an anchor box. */
+  private drawStrokesAt(rect: DOMRect, strokes: DrawingStroke[]): void {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('style', `position:absolute;left:${rect.left}px;top:${rect.top}px;overflow:visible;`);
     svg.setAttribute('width', `${rect.width}`);
@@ -103,9 +113,8 @@ export class OverlayRenderer {
     this.layer!.appendChild(svg);
   }
 
-  /** Render a highlight box or an expandable note pin over the anchor. */
-  private drawAnnotation(patch: Extract<AnyPatch, { op: 'annotation' }>): void {
-    const rect = anchorRect(patch.target);
+  /** Render a highlight box or an expandable note pin over an anchor box. */
+  private drawAnnotationAt(rect: DOMRect, patch: Extract<AnyPatch, { op: 'annotation' }>): void {
     const el = document.createElement('div');
     if (patch.payload.kind === 'highlight') {
       el.style.cssText =

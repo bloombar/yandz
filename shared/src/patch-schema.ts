@@ -19,6 +19,16 @@ export type PatchOp =
 export type UrlMatchMode = 'exact' | 'path' | 'pattern';
 
 /**
+ * Whether a patch applies to ALL instances of the same template (repeated cards/rows/
+ * tiles) rather than just its one element. The structural "family" is found by
+ * generalizing the target selector; this picks the CONTENT GATE that decides which
+ * family members actually change (so siblings with different original content are left
+ * alone). `auto` derives the gate from the change type; the rest force a dimension.
+ * Absent = single element (the default).
+ */
+export type TemplateMode = 'auto' | 'text' | 'styles' | 'both';
+
+/**
  * A version's application scope, chosen by its creator. `page` (default) applies only
  * on the version's own page. `site` applies across every page of the same host, and
  * `global` applies on every site. Site/global versions are public and discoverable in
@@ -54,6 +64,13 @@ export interface ElementTarget {
   domPath?: string;
   /** Position relative to viewport/anchor, in percentages — for drawings/notes. */
   boundingHintPct?: { xPct: number; yPct: number; wPct: number; hPct: number };
+  /** The original element's own (direct-text-node) text, captured at edit time. Used as
+   *  the immutable "original" for the template content gate (so it never depends on the
+   *  live, possibly-modified element). */
+  ownText?: string;
+  /** The original element's style signature: sorted non-volatile class names. Used as the
+   *  immutable original for the template 'styles' gate. */
+  classSig?: string;
 }
 
 export interface DrawingStroke {
@@ -82,6 +99,8 @@ export interface Patch<Op extends PatchOp = PatchOp> {
   payload: PatchPayloadMap[Op];
   /** Order within the Version's patch list. */
   order: number;
+  /** When set, apply to all instances of the same template (see TemplateMode). */
+  template?: TemplateMode;
 }
 
 export type AnyPatch = { [K in PatchOp]: Patch<K> }[PatchOp];
@@ -145,6 +164,9 @@ export function validatePatch(patch: AnyPatch): ValidationResult {
   if (!patch || typeof patch !== 'object') return { ok: false, reason: 'missing patch' };
   if (!patch.target || typeof patch.target !== 'object') {
     return { ok: false, reason: 'missing target' };
+  }
+  if (patch.template !== undefined && !['auto', 'text', 'styles', 'both'].includes(patch.template)) {
+    return { ok: false, reason: `invalid template mode: ${patch.template}` };
   }
 
   switch (patch.op) {

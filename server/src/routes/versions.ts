@@ -25,6 +25,7 @@ const patchInput = z.object({
   target: z.record(z.any()),
   payload: z.record(z.any()),
   order: z.number(),
+  template: z.enum(['auto', 'text', 'styles', 'both']).optional(),
 });
 
 // The version's application scope is chosen by its creator (defaults to 'page').

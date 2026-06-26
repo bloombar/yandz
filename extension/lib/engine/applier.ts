@@ -8,7 +8,7 @@
  */
 import DOMPurify from 'dompurify';
 import { validatePatch, type AnyPatch, type Patch } from '@yandz/shared';
-import { matchTarget, type MatchResult } from './matcher.js';
+import { matchTarget, matchTemplate, type MatchResult } from './matcher.js';
 
 export interface ApplyOutcome {
   applied: number;
@@ -68,12 +68,28 @@ export class PatchEngine {
   /** Apply a single patch; returns false if it couldn't be resolved/applied. */
   private applyOne(patch: AnyPatch, match: MatchResult, doc: Document, assetUrls?: Map<string, string>): boolean {
     // cssOverride is the one op that doesn't strictly need a resolved element if a
-    // selector is present — it's injected as a scoped stylesheet.
-    if (patch.op === 'cssOverride') return this.applyCss(patch as Patch<'cssOverride'>, doc);
+    // selector is present — single mode injects a scoped stylesheet; template mode
+    // applies inline per matched element (a "match all instances" selector can't be
+    // expressed in CSS — esp. text-gated families).
+    if (patch.op === 'cssOverride')
+      return patch.template ? this.applyCssTemplate(patch as Patch<'cssOverride'>, doc) : this.applyCss(patch as Patch<'cssOverride'>, doc);
+
+    // "Apply to all instances": resolve the template family + content gate, apply to each.
+    if (patch.template) return this.applyTemplate(patch, doc, assetUrls);
 
     if (!match.element) return false;
-    const el = match.element;
+    return this.applyToElement(patch, match.element, assetUrls);
+  }
 
+  /** Apply a patch to every gated instance of its template; true if ≥1 applied. */
+  private applyTemplate(patch: AnyPatch, doc: Document, assetUrls?: Map<string, string>): boolean {
+    let any = false;
+    for (const el of matchTemplate(patch, doc)) if (this.applyToElement(patch, el, assetUrls)) any = true;
+    return any;
+  }
+
+  /** Apply a (non-cssOverride) op to one element, pushing its undo. */
+  private applyToElement(patch: AnyPatch, el: Element, assetUrls?: Map<string, string>): boolean {
     switch (patch.op) {
       case 'textReplace': {
         const prev = el.textContent ?? '';
@@ -126,6 +142,26 @@ export class PatchEngine {
       default:
         return false;
     }
+  }
+
+  /** Apply a cssOverride to every gated template instance as INLINE styles, recording an
+   *  undo that restores each property's prior inline value + priority (or removes it). */
+  private applyCssTemplate(patch: Patch<'cssOverride'>, doc: Document): boolean {
+    let any = false;
+    for (const el of matchTemplate(patch, doc)) {
+      const he = el as HTMLElement;
+      if (!he.style) continue;
+      for (const [prop, val] of Object.entries(patch.payload.declarations)) {
+        const prevValue = he.style.getPropertyValue(prop);
+        const prevPriority = he.style.getPropertyPriority(prop);
+        he.style.setProperty(prop, val);
+        this.applied.push({
+          undo: () => (prevValue ? he.style.setProperty(prop, prevValue, prevPriority) : he.style.removeProperty(prop)),
+        });
+      }
+      any = true;
+    }
+    return any;
   }
 
   /** Inject cssOverride declarations as a single scoped <style> element. */

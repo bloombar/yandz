@@ -122,6 +122,55 @@ describe('versions + sanitization', () => {
       .send({ patches: [samplePatch('hijack')] });
     expect(forbidden.status).toBe(403);
   });
+
+  it('persists a patch template mode + target signatures through create and update', async () => {
+    const u = await makeUser('tmplauthor');
+    const create = await request(app)
+      .post('/versions')
+      .set(auth(u.token))
+      .send({
+        url: 'https://example.com/tmpl',
+        name: 'tpl',
+        patches: [
+          {
+            op: 'cssOverride',
+            target: { cssSelector: '.card:nth-child(1)', ownText: 'Apple', classSig: 'div|card' },
+            payload: { declarations: { color: 'red' } },
+            order: 0,
+            template: 'auto',
+          },
+        ],
+      });
+    expect(create.status).toBe(201);
+    const id = create.body.id as string;
+
+    let fetched = await request(app).get(`/versions/${id}`);
+    expect(fetched.body.patches[0].template).toBe('auto');
+    expect(fetched.body.patches[0].target.ownText).toBe('Apple');
+    expect(fetched.body.patches[0].target.classSig).toBe('div|card');
+
+    // Updating the gate mode persists.
+    await request(app)
+      .put(`/versions/${id}`)
+      .set(auth(u.token))
+      .send({
+        patches: [
+          { op: 'cssOverride', target: { cssSelector: '.card', classSig: 'div|card' }, payload: { declarations: { color: 'red' } }, order: 0, template: 'styles' },
+        ],
+      });
+    fetched = await request(app).get(`/versions/${id}`);
+    expect(fetched.body.patches[0].template).toBe('styles');
+
+    // An invalid template value is rejected by sanitize/validate.
+    const bad = await request(app)
+      .post('/versions')
+      .set(auth(u.token))
+      .send({
+        url: 'https://example.com/tmpl2',
+        patches: [{ op: 'cssOverride', target: { cssSelector: '#x' }, payload: { declarations: { color: 'red' } }, order: 0, template: 'nope' }],
+      });
+    expect(bad.status).toBe(400); // zod enum rejects it at the boundary
+  });
 });
 
 describe('delete version', () => {

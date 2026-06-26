@@ -33,6 +33,8 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .applied-row.off .applied-toggle { color: #8889; }
 .applied-remove { color: #8889; }
 .applied-remove:hover { color: #e74c3c; }
+/* "Apply to all instances" control under an expanded change. */
+.template-control { display: flex; flex-direction: column; gap: 6px; padding: 6px 0 2px; font-size: 12px; }
 /* Scope chip (Page / Site / Global). */
 .scope-chip { flex-shrink: 0; font: 10px system-ui; font-weight: 600; padding: 1px 6px; border-radius: 999px; color: #fff; }
 .scope-chip.scope-page { background: #4c9ffe; }
@@ -114,8 +116,13 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .vr-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .vr-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .vr-line > .page-link, .vr-line > .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+/* Byline column: author/date on top, the Page/Site/Global pill stacked below it. */
+.vr-byline { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; flex: 1; min-width: 0; }
+.vr-byline > .muted { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Page title — unstyled plain text (clickable to apply, but not link-like). */
 .page-link { color: inherit; cursor: pointer; }
+/* Site favicon shown before a page/site version's title. */
+.favicon { width: 14px; height: 14px; vertical-align: middle; border-radius: 2px; }
 /* Secondary line: version name (link-like) + URL (muted). Both clickable to apply. */
 .vr-sub, .page-ref { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .version-name { color: #4c9ffe; cursor: pointer; }

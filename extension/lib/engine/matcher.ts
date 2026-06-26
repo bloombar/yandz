@@ -6,7 +6,8 @@
  * one element above a confidence threshold. If none do, the patch is "unresolved"
  * (surfaced in the panel) rather than applied to the wrong node. See §4 of the plan.
  */
-import type { ElementTarget } from '@yandz/shared';
+import type { AnyPatch, ElementTarget } from '@yandz/shared';
+import { ownText, classSignature } from './fingerprint.js';
 
 export interface MatchResult {
   element: Element | null;
@@ -90,6 +91,74 @@ function byText(root: ParentNode, fingerprint: string): Element | null {
  * normally `document`. Confidence is 1 for exact-structural hits (css/xpath/text)
  * and the attr match ratio for attribute-based hits.
  */
+/**
+ * Strip positional pseudo-classes so a uniquely-matching finder selector becomes a
+ * FAMILY selector: `.card:nth-child(2) > h2` → `.card > h2` (every card title).
+ */
+export function generalizeSelector(sel: string): string {
+  return sel
+    .replace(
+      /:(?:nth-child|nth-of-type|nth-last-child|nth-last-of-type|first-child|last-child|first-of-type|last-of-type|only-child|only-of-type)(?:\([^)]*\))?/g,
+      '',
+    )
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/** A bare single-tag selector (no class/id/attr/combinator) is too broad to be a
+ *  "template family" — it would match every <div>/<span> on the page. */
+function tooGeneric(sel: string): boolean {
+  return !/[.#[>~+ ]/.test(sel);
+}
+
+/** Whether a candidate element passes the patch's content gate (so siblings with
+ *  different original content aren't modified). See the plan's gate table. */
+function passesGate(patch: AnyPatch, el: Element): boolean {
+  const mode = patch.template!;
+  const t = patch.target;
+  const wantText = mode === 'text' || mode === 'both' || (mode === 'auto' && patch.op === 'textReplace');
+  const wantStyles = mode === 'styles' || mode === 'both' || (mode === 'auto' && patch.op === 'cssOverride');
+  if (wantText && t.ownText !== undefined && normalizeText(ownText(el)) !== normalizeText(t.ownText)) return false;
+  if (wantStyles && t.classSig !== undefined && classSignature(el) !== t.classSig) return false;
+  if (mode === 'auto') {
+    if (patch.op === 'attrChange') {
+      const { attr, from } = patch.payload;
+      if (from !== undefined && el.getAttribute(attr) !== from) return false;
+    }
+    if (patch.op === 'imageSwap') {
+      const orig = patch.payload.originalSrcHash;
+      if (orig && el.getAttribute('src') !== orig) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Resolve all "same template" instances a `template` patch should apply to: the
+ * structural family (generalized selector) filtered by the content gate. Falls back to
+ * the single matched element when there's no usable family selector.
+ */
+export function matchTemplate(patch: AnyPatch, doc: Document = document): Element[] {
+  const single = (): Element[] => {
+    const el = matchTarget(patch.target, doc).element;
+    return el ? [el] : [];
+  };
+  const sel = patch.target.cssSelector;
+  if (!sel) return single();
+  const general = generalizeSelector(sel);
+  if (!general || tooGeneric(general)) return single();
+  let family: Element[];
+  try {
+    family = Array.from(doc.querySelectorAll(general));
+  } catch {
+    return single();
+  }
+  if (family.length === 0) return single();
+  // Gate the family; an empty result means nothing currently matches the original
+  // content (e.g. already applied) → no-op, which is correct.
+  return family.filter((el) => passesGate(patch, el));
+}
+
 export function matchTarget(target: ElementTarget, doc: Document = document): MatchResult {
   if (target.cssSelector) {
     const el = byCss(doc, target.cssSelector);

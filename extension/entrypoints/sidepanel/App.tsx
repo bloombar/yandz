@@ -329,6 +329,19 @@ export function App(): React.JSX.Element {
     })();
   };
 
+  /** Clicking a version row toggles it: if it's active here, deactivate (remove from
+   *  Applied here, which also clears the row's active highlight); otherwise activate it. */
+  const onToggleVersion = (v: FeedItem) => {
+    if (appliedIds.has(v.id)) {
+      setApplied((xs) => xs.filter((a) => a.versionId !== v.id));
+      setAppliedItems((xs) => xs.filter((x) => x.id !== v.id));
+      void Api.removeActivation(v.id).catch(() => {});
+      void messageTab({ type: 'yandz:refresh-activations' });
+    } else {
+      onApply(v);
+    }
+  };
+
   /** Bar toggle: pause/resume an activation, keeping it in the list. */
   const onToggle = (e: AppliedEntry) => {
     const next = !e.on;
@@ -549,7 +562,7 @@ export function App(): React.JSX.Element {
                 version={v}
                 active={appliedIds.has(v.id)}
                 currentUserId={currentUserId}
-                onApply={onApply}
+                onApply={onToggleVersion}
                 onVote={onVote}
                 onOpenProfile={(userId) => push({ name: 'profile', userId })}
                 onOpenComments={(x) => openVersionPanel(x, 'comments')}
@@ -580,7 +593,7 @@ export function App(): React.JSX.Element {
         </>
       )}
 
-      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(v) => openVersionPanel(v, 'comments')} onOpenChanges={(v) => openVersionPanel(v, 'changes')} onOpenDetails={openDetails} onApply={onApply} currentPageKey={currentPageKey} currentHost={currentHost} currentUserId={currentUserId} />}
+      {view.name === 'profile' && <Profile userId={view.userId} onClose={close} onOpenProfile={(userId) => push({ name: 'profile', userId })} onOpenComments={(v) => openVersionPanel(v, 'comments')} onOpenChanges={(v) => openVersionPanel(v, 'changes')} onOpenDetails={openDetails} onApply={onToggleVersion} isActive={(id) => appliedIds.has(id)} currentPageKey={currentPageKey} currentHost={currentHost} currentUserId={currentUserId} />}
       {view.name === 'changes' && (
         <VersionChanges
           version={view.version}

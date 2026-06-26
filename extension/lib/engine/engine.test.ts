@@ -3,7 +3,7 @@
  * exercised against jsdom DOMs.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { matchTarget, normalizeText, ACCEPT_THRESHOLD } from './matcher.js';
+import { matchTarget, matchTemplate, generalizeSelector, normalizeText, ACCEPT_THRESHOLD } from './matcher.js';
 import { PatchEngine } from './applier.js';
 import type { AnyPatch } from '@yandz/shared';
 
@@ -163,5 +163,129 @@ describe('PatchEngine apply/revert', () => {
     const out = engine.apply([patch]);
     expect(out.applied).toBe(0);
     expect(out.unresolved).toHaveLength(1);
+  });
+});
+
+// Repeated template content: 4 cards (two "Apple" titles with src a.jpg, a "Banana",
+// and an "Apple" whose title text is wrapped in a <span>), plus a decoy <h2> outside any
+// card. Exercises structural family + content gate.
+const CARDS = `
+  <div class="card"><h2>Apple</h2><img src="a.jpg" alt=""></div>
+  <div class="card"><h2>Apple</h2><img src="b.jpg" alt=""></div>
+  <div class="card"><h2>Banana</h2><img src="a.jpg" alt=""></div>
+  <div class="card"><h2><span>Apple</span></h2><img src="a.jpg" alt=""></div>
+  <h2>Apple</h2>
+`;
+
+describe('template matching (apply to all instances)', () => {
+  let engine: PatchEngine;
+  beforeEach(() => {
+    engine = new PatchEngine();
+  });
+
+  it('generalizeSelector strips positional pseudo-classes', () => {
+    expect(generalizeSelector('.card:nth-child(2) > h2')).toBe('.card > h2');
+    expect(generalizeSelector('ul > li:nth-of-type(3)')).toBe('ul > li');
+    expect(generalizeSelector('#x')).toBe('#x');
+  });
+
+  it('text gate (auto textReplace) matches same OWN-text instances within the family', () => {
+    setBody(CARDS);
+    const patch: AnyPatch = {
+      op: 'textReplace',
+      order: 0,
+      template: 'auto',
+      target: { cssSelector: '.card:nth-child(1) > h2', ownText: 'Apple', classSig: 'h2|' },
+      payload: { from: 'Apple', to: 'Cherry' },
+    };
+    // The two plain-text "Apple" titles only: not "Banana", not the <span>-wrapped one
+    // (own-text is empty), not the decoy <h2> (outside .card → not in the family).
+    expect(matchTemplate(patch, document).map((e) => e.textContent)).toEqual(['Apple', 'Apple']);
+  });
+
+  it('styles gate (auto cssOverride on .card) matches all same-class instances', () => {
+    setBody(CARDS);
+    const patch: AnyPatch = {
+      op: 'cssOverride',
+      order: 0,
+      template: 'auto',
+      target: { cssSelector: '.card:nth-child(1)', classSig: 'div|card' },
+      payload: { declarations: { color: 'red' } },
+    };
+    expect(matchTemplate(patch, document)).toHaveLength(4); // all four .card divs
+  });
+
+  it('image gate (auto imageSwap) matches only instances with the same original src', () => {
+    setBody(CARDS);
+    const patch: AnyPatch = {
+      op: 'imageSwap',
+      order: 0,
+      template: 'auto',
+      target: { cssSelector: '.card:nth-child(1) > img', classSig: 'img|' },
+      payload: { originalSrcHash: 'a.jpg', newAssetUrl: 'https://cdn/x.png' },
+    };
+    expect(matchTemplate(patch, document)).toHaveLength(3); // a.jpg in cards 1,3,4 (not b.jpg)
+  });
+
+  it('falls back to the single element for a too-generic selector', () => {
+    setBody('<h2>Apple</h2><h2>Apple</h2>');
+    const patch: AnyPatch = {
+      op: 'textReplace',
+      order: 0,
+      template: 'auto',
+      target: { cssSelector: 'h2:nth-child(1)', ownText: 'Apple', classSig: 'h2|' },
+      payload: { from: 'Apple', to: 'Cherry' },
+    };
+    // generalized 'h2' is a bare tag → not treated as a family.
+    expect(matchTemplate(patch, document)).toHaveLength(1);
+  });
+
+  it('applies textReplace to every gated instance and reverts each', () => {
+    setBody(CARDS);
+    const patch: AnyPatch = {
+      op: 'textReplace',
+      order: 0,
+      template: 'auto',
+      target: { cssSelector: '.card:nth-child(1) > h2', ownText: 'Apple', classSig: 'h2|' },
+      payload: { from: 'Apple', to: 'Cherry' },
+    };
+    engine.apply([patch]);
+    const titles = () => Array.from(document.querySelectorAll('.card > h2')).map((h) => h.textContent);
+    expect(titles()).toEqual(['Cherry', 'Cherry', 'Banana', 'Apple']); // span-wrapped untouched
+    engine.revertAll();
+    expect(titles()).toEqual(['Apple', 'Apple', 'Banana', 'Apple']);
+  });
+
+  it('applies cssOverride INLINE to every gated instance and reverts the inline styles', () => {
+    setBody(CARDS);
+    const patch: AnyPatch = {
+      op: 'cssOverride',
+      order: 0,
+      template: 'auto',
+      target: { cssSelector: '.card:nth-child(1)', classSig: 'div|card' },
+      payload: { declarations: { color: 'red' } },
+    };
+    engine.apply([patch]);
+    const cards = Array.from(document.querySelectorAll('.card')) as HTMLElement[];
+    expect(cards.every((c) => c.style.color === 'red')).toBe(true);
+    expect(document.querySelector('style[data-yandz="overrides"]')).toBeNull(); // inline, not a rule
+    engine.revertAll();
+    expect(cards.every((c) => c.style.color === '')).toBe(true);
+  });
+
+  it('attrChange gate (auto) only sets the attr where the original value matches', () => {
+    setBody('<a class="lnk" title="on">1</a><a class="lnk" title="off">2</a><a class="lnk" title="on">3</a>');
+    const patch: AnyPatch = {
+      op: 'attrChange',
+      order: 0,
+      template: 'auto',
+      target: { cssSelector: '.lnk:nth-child(1)', classSig: 'a|lnk' },
+      payload: { attr: 'title', value: 'new', from: 'on' },
+    };
+    engine.apply([patch]);
+    const vals = () => Array.from(document.querySelectorAll('.lnk')).map((a) => a.getAttribute('title'));
+    expect(vals()).toEqual(['new', 'off', 'new']); // the 'off' one is left alone
+    engine.revertAll();
+    expect(vals()).toEqual(['on', 'off', 'on']);
   });
 });

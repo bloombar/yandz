@@ -8,9 +8,25 @@ import { finder } from '@medv/finder';
 import type { ElementTarget } from '@yandz/shared';
 
 /** Heuristic: looks like a build-hashed/utility class we shouldn't anchor to. */
-function isVolatileClass(name: string): boolean {
+export function isVolatileClass(name: string): boolean {
   // e.g. "css-1a2b3c", "sc-bdfBwQ", hashes, or very long random-looking tokens.
   return /^(css-|sc-|jsx-)/.test(name) || /\d{4,}/.test(name) || /^[a-z0-9]{8,}$/i.test(name);
+}
+
+/** The element's OWN text — concatenated direct text-node children only (not descendants).
+ *  Used for template "same text" matching so a wrapper and its child don't co-match. */
+export function ownText(el: Element): string {
+  let s = '';
+  for (const node of Array.from(el.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) s += node.textContent ?? '';
+  }
+  return s;
+}
+
+/** Style signature for template matching: tag + sorted non-volatile class names. */
+export function classSignature(el: Element): string {
+  const classes = Array.from(el.classList).filter((c) => !isVolatileClass(c)).sort();
+  return `${el.tagName.toLowerCase()}|${classes.join('.')}`;
 }
 
 /** Absolute-ish XPath using tag + nth-of-type, a structural fallback. */
@@ -83,5 +99,8 @@ export function fingerprintElement(el: Element): ElementTarget {
     textFingerprint: (el.textContent ?? '').slice(0, 200),
     attrFingerprint: attrFingerprint(el),
     domPath: buildDomPath(el),
+    // Immutable originals for the "apply to all instances" content gate.
+    ownText: ownText(el).slice(0, 200),
+    classSig: classSignature(el),
   };
 }
