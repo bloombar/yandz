@@ -14,6 +14,8 @@ export interface AppliedEntry {
   scope: FeedScope;
   versionId: string;
   name: string;
+  /** Author, so the bar can link to their profile. */
+  author: { id: string; handle: string };
   /** Enabled (applied) vs paused (kept in the list but not applied). */
   on: boolean;
 }
@@ -27,9 +29,10 @@ interface Props {
   onToggle: (e: AppliedEntry) => void;
   onRemove: (e: AppliedEntry) => void;
   onDetails: (e: AppliedEntry) => void;
+  onOpenProfile: (userId: string) => void;
 }
 
-export function AppliedBar({ applied, onToggle, onRemove, onDetails }: Props): React.JSX.Element | null {
+export function AppliedBar({ applied, onToggle, onRemove, onDetails, onOpenProfile }: Props): React.JSX.Element | null {
   if (applied.length === 0) return null;
   const rows = [...applied].sort((a, b) => ORDER[a.scope] - ORDER[b.scope]);
   return (
@@ -38,8 +41,18 @@ export function AppliedBar({ applied, onToggle, onRemove, onDetails }: Props): R
       {rows.map((e) => (
         <div className={`applied-row ${e.on ? '' : 'off'}`} key={e.versionId}>
           <span className={`scope-chip scope-${e.scope}`}>{SCOPE_LABEL[e.scope]}</span>
-          <span className="applied-name" role="button" title="View details" onClick={() => onDetails(e)}>
-            {e.name}
+          <span className="applied-label">
+            <span className="applied-name" role="button" title="View details" onClick={() => onDetails(e)}>
+              {e.name}
+            </span>
+            {e.author && (
+              <>
+                <span className="muted">, by </span>
+                <span className="handle" title={`View u/${e.author.handle}`} onClick={() => onOpenProfile(e.author.id)}>
+                  u/{e.author.handle}
+                </span>
+              </>
+            )}
           </span>
           <button
             className="icon-btn applied-toggle"

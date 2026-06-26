@@ -8,10 +8,20 @@
  * otherwise it creates a brand-new version.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { X, Trash2, ChevronRight, Pencil } from 'lucide-react';
 import { browser } from 'wxt/browser';
 import { Api } from '../../../lib/api.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../../lib/config.js';
+import {
+  stepFontSize,
+  cssColorToHex,
+  isBoldWeight,
+  targetSig,
+  mergeStyle,
+  upsertAttr as upsertAttrPatch,
+  removeAttr as removeAttrPatch,
+  setTextPatch,
+} from '../../../lib/style-edit.js';
 import { PanelHeader } from './PanelHeader.js';
 import { PanelTabs, type VersionTab } from './PanelTabs.js';
 import { CommentBoard } from './CommentBoard.js';
@@ -24,7 +34,14 @@ type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 interface PickedMessage {
   type: 'yandz:element-picked';
   target: ElementTarget;
-  snapshot: { tagName: string; text: string; src?: string; attrs: Record<string, string> };
+  snapshot: {
+    tagName: string;
+    text: string;
+    src?: string;
+    attrs: Record<string, string>;
+    /** A few computed styles, so the style controls can show current values. */
+    styles?: { color: string; backgroundColor: string; fontSize: string; fontWeight: string; display: string };
+  };
 }
 interface DrawMessage {
   type: 'yandz:drawing-captured';
@@ -36,7 +53,11 @@ interface TextEditedMessage {
   target: ElementTarget;
   payload: { from: string; to: string };
 }
-type EditorMessage = PickedMessage | DrawMessage | TextEditedMessage;
+/** Sent when a new pick/draw session starts — clears the previously selected element. */
+interface DeselectMessage {
+  type: 'yandz:deselect';
+}
+type EditorMessage = PickedMessage | DrawMessage | TextEditedMessage | DeselectMessage;
 
 interface Props {
   url: string;
@@ -57,7 +78,7 @@ interface Props {
   /** Which tab to show first (editing defaults to Changes). */
   initialTab?: VersionTab;
   /** Tool to auto-start on mount, when launched from a top-nav tool icon. */
-  initialTool?: 'pick' | 'draw';
+  initialTool?: 'pick' | 'draw' | 'style';
   /** Returns false when the content script isn't reachable on the active tab. */
   messageTab: (payload: unknown) => Promise<boolean>;
   /** Called with the new version's id and chosen scope after a successful save. */
@@ -87,6 +108,9 @@ export function Editor({
   const [patches, setPatches] = useState<AnyPatch[]>([]);
   const [picked, setPicked] = useState<PickedMessage | null>(null);
   const [name, setName] = useState(editName ?? '');
+  // Inline title rename (pencil → form → Save/Enter/✕).
+  const [renaming, setRenaming] = useState(false);
+  const [draftName, setDraftName] = useState('');
   // The whole version's application scope, chosen by its creator.
   const [scope, setScope] = useState<VersionScope>(editScope ?? 'page');
   const [tab, setTab] = useState<VersionTab>(initialTab);
@@ -165,7 +189,11 @@ export function Editor({
     if (startedRef.current || !initialTool) return;
     startedRef.current = true;
     void runTool(
-      initialTool === 'pick' ? { type: 'yandz:start-picker' } : { type: 'yandz:start-draw', color: '#e11' },
+      initialTool === 'pick'
+        ? { type: 'yandz:start-picker' }
+        : initialTool === 'style'
+          ? { type: 'yandz:start-style-picker' }
+          : { type: 'yandz:start-draw', color: '#e11' },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTool]);
@@ -235,6 +263,23 @@ export function Editor({
     else onClose();
   };
 
+  /** Open the inline title rename, prefilled with the current name. */
+  const beginRename = () => {
+    setDraftName(name);
+    setRenaming(true);
+  };
+  /** Save the edited title: update local name and persist it (when the version exists). */
+  const saveRename = () => {
+    const next = draftName.trim();
+    setRenaming(false);
+    if (!next || next === name) return;
+    setName(next);
+    nameRef.current = next;
+    dirtyRef.current = true;
+    void persist(); // no-op until the version has at least one change saved
+  };
+  const cancelRename = () => setRenaming(false);
+
   /** Replace (or add) the drawing patch for a target — drawing auto-emits the FULL
    *  stroke set repeatedly, so we update one patch rather than appending each time. */
   const upsertDrawing = (target: ElementTarget, strokes: DrawingStroke[]) => {
@@ -259,10 +304,37 @@ export function Editor({
     });
   };
 
+  /** Commit a new patch list: keep the ref in sync and preview it live on the page. */
+  const commit = (next: AnyPatch[]) => {
+    dirtyRef.current = true;
+    patchesRef.current = next;
+    setPatches(next);
+    void messageTab({ type: 'yandz:apply-patches', patches: next });
+  };
+
+  /** Merge CSS declarations into the target's style patch and preview (see mergeStyle). */
+  const upsertStyle = (target: ElementTarget, partial: Record<string, string>) =>
+    commit(mergeStyle(patchesRef.current, target, partial));
+
+  /** Remove one CSS declaration from a target's style patch. */
+  const removeStyleDecl = (target: ElementTarget, prop: string) => upsertStyle(target, { [prop]: '' });
+
+  /** Set an HTML attribute on a target (one `attrChange` patch per attr; replaces value). */
+  const upsertAttr = (target: ElementTarget, attr: string, value: string) =>
+    commit(upsertAttrPatch(patchesRef.current, target, attr, value, picked?.snapshot.attrs[attr]));
+
+  /** Remove an attribute change from a target. */
+  const removeAttr = (target: ElementTarget, attr: string) =>
+    commit(removeAttrPatch(patchesRef.current, target, attr));
+
   // Receive picks, in-place text edits, and drawings from the content script.
   useEffect(() => {
     const listener = (msg: EditorMessage) => {
       if (msg?.type === 'yandz:element-picked') setPicked(msg);
+      else if (msg?.type === 'yandz:deselect')
+        // A new pick/draw session started (or another tool was launched) — clear the
+        // previously selected element so its forms are disabled until a new pick lands.
+        setPicked(null);
       else if (msg?.type === 'yandz:text-edited')
         // In-place edit already changed the page; stage the matching textReplace.
         addPatch({ op: 'textReplace', target: msg.target, payload: msg.payload });
@@ -296,16 +368,42 @@ export function Editor({
 
   return (
     <div className="list">
-      {/* Title (non-editable, auto-named) + attribution. The X flushes the pending
-          auto-save, then returns to the list. */}
+      {/* Editable title (pencil → form → Save/Enter/✕) + attribution. The X flushes the
+          pending auto-save, then returns to the list. */}
       <PanelHeader
         title={
-          editVersionId
-            ? `“${name || 'Your version'}”` // editing your own version (no attribution)
-            : `“${name || 'New version'}”` +
-              (baseVersionId
-                ? `, based on “${baseName ?? 'a version'}” by u/${baseAuthorHandle ?? 'another'}`
-                : '')
+          renaming ? (
+            <span className="title-edit">
+              <input
+                className="title-input"
+                autoFocus
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveRename();
+                  else if (e.key === 'Escape') cancelRename();
+                }}
+              />
+              <button className="btn" onClick={saveRename}>
+                Save
+              </button>
+              <button className="icon-btn" aria-label="Cancel rename" title="Cancel" onClick={cancelRename}>
+                <X size={14} />
+              </button>
+            </span>
+          ) : (
+            <span className="title-read">
+              “{name || (editVersionId ? 'Your version' : 'New version')}”
+              <button className="icon-btn" aria-label="Rename version" title="Rename" onClick={beginRename}>
+                <Pencil size={13} />
+              </button>
+              {!editVersionId && baseVersionId && (
+                <span className="muted">
+                  , based on “{baseName ?? 'a version'}” by u/{baseAuthorHandle ?? 'another'}
+                </span>
+              )}
+            </span>
+          )
         }
         onClose={() => void done()}
       />
@@ -347,9 +445,27 @@ export function Editor({
           {picked && (
             <PickedEditor
               picked={picked}
-              onAdd={addPatch}
+              onText={(to) => commit(setTextPatch(patchesRef.current, picked.target, picked.snapshot.text, to))}
               onSwapImage={swapImage}
               onClose={() => setPicked(null)}
+              // Current style/attr changes for THIS element (so the controls reflect
+              // state and the applied-list can show + delete them).
+              declarations={
+                (patches.find(
+                  (p): p is Extract<AnyPatch, { op: 'cssOverride' }> =>
+                    p.op === 'cssOverride' && targetSig(p.target) === targetSig(picked.target),
+                )?.payload.declarations) ?? {}
+              }
+              attrItems={patches
+                .filter(
+                  (p): p is Extract<AnyPatch, { op: 'attrChange' }> =>
+                    p.op === 'attrChange' && targetSig(p.target) === targetSig(picked.target),
+                )
+                .map((p) => ({ attr: p.payload.attr, value: p.payload.value }))}
+              onStyle={(partial) => upsertStyle(picked.target, partial)}
+              onRemoveStyle={(prop) => removeStyleDecl(picked.target, prop)}
+              onSetAttr={(attr, value) => upsertAttr(picked.target, attr, value)}
+              onRemoveAttr={(attr) => removeAttr(picked.target, attr)}
             />
           )}
 
@@ -391,19 +507,75 @@ export function Editor({
  *  Framed as a single, dismissable card for the one element being edited. */
 function PickedEditor({
   picked,
-  onAdd,
+  onText,
   onSwapImage,
   onClose,
+  declarations,
+  attrItems,
+  onStyle,
+  onRemoveStyle,
+  onSetAttr,
+  onRemoveAttr,
 }: {
   picked: PickedMessage;
-  onAdd: (p: Omit<AnyPatch, 'order'>) => void;
+  /** Apply the element's text (the value the field is left on). */
+  onText: (to: string) => void;
   onSwapImage: (f: File) => void;
   onClose: () => void;
+  /** CSS declarations currently applied to this element (the cssOverride patch). */
+  declarations: Record<string, string>;
+  /** Attribute changes currently applied to this element. */
+  attrItems: { attr: string; value: string }[];
+  onStyle: (partial: Record<string, string>) => void;
+  onRemoveStyle: (prop: string) => void;
+  onSetAttr: (attr: string, value: string) => void;
+  onRemoveAttr: (attr: string) => void;
 }): React.JSX.Element {
   const [text, setText] = useState(picked.snapshot.text);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [cssProp, setCssProp] = useState('');
+  const [cssVal, setCssVal] = useState('');
+  const [attrName, setAttrName] = useState('');
+  const [attrVal, setAttrVal] = useState('');
 
   const isImage = picked.snapshot.tagName === 'img';
   const title = isImage ? 'Editing image' : `Editing <${picked.snapshot.tagName}>`;
+
+  // Forms commit on Enter or when focus leaves the form ("mouse out"), then reset.
+  const submitCss = () => {
+    const prop = cssProp.trim();
+    const val = cssVal.trim();
+    if (prop && val) onStyle({ [prop]: val });
+    setCssProp('');
+    setCssVal('');
+  };
+  const submitAttr = () => {
+    const attr = attrName.trim();
+    if (attr) onSetAttr(attr, attrVal);
+    setAttrName('');
+    setAttrVal('');
+  };
+  /** Commit a multi-input form when focus leaves it entirely (not when moving between
+   *  its own inputs). */
+  const onFormBlur = (submit: () => void) => (e: React.FocusEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) submit();
+  };
+  const onFormEnter = (submit: () => void) => (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submit();
+    }
+  };
+
+  // Friendly-control state: prefer an explicit declaration, else the element's computed
+  // style, else a sensible default.
+  const st = picked.snapshot.styles;
+  const textColor = cssColorToHex(declarations['color'] ?? st?.color, '#000000');
+  const bgColor = cssColorToHex(declarations['background-color'] ?? st?.backgroundColor, '#ffffff');
+  const curFontSize = declarations['font-size'] ?? st?.fontSize ?? '16px';
+  const isBold = isBoldWeight(declarations['font-weight'] ?? st?.fontWeight);
+  const isHidden = declarations['display'] === 'none';
+  const hasSettings = Object.keys(declarations).length > 0 || attrItems.length > 0;
 
   return (
     <div className="card picked-editor">
@@ -420,19 +592,18 @@ function PickedEditor({
         <img className="picked-preview" src={picked.snapshot.src} alt="" />
       )}
 
-      {/* Text — not meaningful for images. */}
+      {/* Text — not meaningful for images. Applies on Enter or when you leave the field. */}
       {!isImage && (
         <div className="field">
           <label>Text</label>
-          <input value={text} onChange={(e) => setText(e.target.value)} />
-          <button
-            className="btn"
-            onClick={() =>
-              onAdd({ op: 'textReplace', target: picked.target, payload: { from: picked.snapshot.text, to: text } })
-            }
-          >
-            Replace text
-          </button>
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+            }}
+            onBlur={() => onText(text)}
+          />
         </div>
       )}
 
@@ -447,6 +618,91 @@ function PickedEditor({
             onChange={(e) => e.target.files?.[0] && onSwapImage(e.target.files[0])}
           />
           <p className="field-hint muted">Pick an image to swap in for this one.</p>
+        </div>
+      )}
+
+      {/* Style — friendly controls for the common cases (apply live as you change). */}
+      <div className="field">
+        <label>Style</label>
+        <div className="style-controls">
+          <label className="style-swatch">
+            <span>Text</span>
+            <input type="color" value={textColor} onChange={(e) => onStyle({ color: e.target.value })} />
+          </label>
+          <label className="style-swatch">
+            <span>Fill</span>
+            <input type="color" value={bgColor} onChange={(e) => onStyle({ 'background-color': e.target.value })} />
+          </label>
+          <button className="btn" title="Smaller text" onClick={() => onStyle({ 'font-size': stepFontSize(curFontSize, -2) })}>
+            A−
+          </button>
+          <button className="btn" title="Larger text" onClick={() => onStyle({ 'font-size': stepFontSize(curFontSize, 2) })}>
+            A+
+          </button>
+          <button
+            className={`btn ${isBold ? 'active' : ''}`}
+            title="Bold"
+            onClick={() => (isBold ? onRemoveStyle('font-weight') : onStyle({ 'font-weight': 'bold' }))}
+          >
+            B
+          </button>
+          <button
+            className={`btn ${isHidden ? 'active' : ''}`}
+            title={isHidden ? 'Show element' : 'Hide element'}
+            onClick={() => (isHidden ? onRemoveStyle('display') : onStyle({ display: 'none' }))}
+          >
+            {isHidden ? 'Show' : 'Hide'}
+          </button>
+        </div>
+      </div>
+
+      {/* Advanced — raw CSS + attribute editing, collapsed by default. */}
+      <div className="field">
+        <button
+          className="advanced-toggle"
+          aria-expanded={showAdvanced}
+          onClick={() => setShowAdvanced((o) => !o)}
+        >
+          <ChevronRight size={14} className={`site-chevron ${showAdvanced ? 'open' : ''}`} /> Advanced
+        </button>
+        {showAdvanced && (
+          <>
+            <label className="muted advanced-label">Custom CSS</label>
+            <div className="field-row" onKeyDown={onFormEnter(submitCss)} onBlur={onFormBlur(submitCss)}>
+              <input value={cssProp} onChange={(e) => setCssProp(e.target.value)} placeholder="property (e.g. border)" />
+              <input value={cssVal} onChange={(e) => setCssVal(e.target.value)} placeholder="value (e.g. 1px solid red)" />
+            </div>
+
+            <label className="muted advanced-label">Custom attribute</label>
+            <div className="field-row" onKeyDown={onFormEnter(submitAttr)} onBlur={onFormBlur(submitAttr)}>
+              <input value={attrName} onChange={(e) => setAttrName(e.target.value)} placeholder="attribute (e.g. title)" />
+              <input value={attrVal} onChange={(e) => setAttrVal(e.target.value)} placeholder="value" />
+            </div>
+            <p className="field-hint muted">Press Enter or click away to apply. Unsafe CSS and non-whitelisted attributes are rejected when saving.</p>
+          </>
+        )}
+      </div>
+
+      {/* Applied style/attribute settings for this element, each deletable. */}
+      {hasSettings && (
+        <div className="field">
+          <label>Applied to this element</label>
+          {Object.entries(declarations).map(([prop, val]) => (
+            <div className="applied-setting" key={`css:${prop}`}>
+              <span className="applied-setting-text">{prop}: {val}</span>
+              <button className="icon-btn" aria-label={`Remove ${prop}`} title="Remove" onClick={() => onRemoveStyle(prop)}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+          {attrItems.map(({ attr, value }) => (
+            <div className="applied-setting" key={`attr:${attr}`}>
+              <span className="applied-setting-text">{attr} = {value || '(empty)'}</span>
+              <button className="icon-btn" aria-label={`Remove ${attr}`} title="Remove" onClick={() => onRemoveAttr(attr)}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
         </div>
       )}
 

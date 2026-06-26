@@ -26,7 +26,8 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .applied-row { display: flex; align-items: center; gap: 8px; }
 /* A paused (toggled-off) activation stays in the bar but is dimmed. */
 .applied-row.off { opacity: 0.5; }
-.applied-name { flex: 1; cursor: pointer; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.applied-label { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.applied-name { cursor: pointer; }
 .applied-name:hover { text-decoration: underline; }
 .applied-toggle { color: #4c9ffe; }
 .applied-row.off .applied-toggle { color: #8889; }
@@ -78,6 +79,18 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .field > .btn, .field-row > .btn { align-self: flex-start; }
 .field-row > .btn { align-self: auto; }
 .field-hint { margin: 0; font-size: 11px; }
+/* Style tool: friendly controls row (color swatches + size/bold/hide buttons). */
+.style-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.style-swatch { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #8889; }
+.style-swatch input[type='color'] { width: 28px; height: 24px; padding: 0; border: 1px solid #8884; border-radius: 6px; background: transparent; cursor: pointer; }
+.style-controls .btn { padding: 4px 8px; min-width: 30px; }
+.style-controls .btn.active { background: #4c9ffe; color: #fff; border-color: transparent; }
+/* Advanced (raw CSS / attribute) collapsible toggle. */
+.advanced-toggle { display: inline-flex; align-items: center; gap: 4px; border: none; background: transparent; color: inherit; font: inherit; cursor: pointer; padding: 0; }
+.advanced-label { font-size: 11px; margin-top: 4px; }
+/* Rolling list of style/attribute settings applied to the picked element. */
+.applied-setting { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-bottom: 1px solid #8883; }
+.applied-setting-text { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .row { display: flex; align-items: center; gap: 8px; }
 .handle { color: #4c9ffe; cursor: pointer; }
 .muted { color: #8889; }
@@ -131,6 +144,11 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 /* Panel header with top-right close icon. */
 .panel-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #8883; }
 .profile-name { display: inline-flex; align-items: center; gap: 4px; }
+/* Editable version title: read mode (name + pencil) and edit mode (input + Save + ✕). */
+.title-read { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.title-edit { display: inline-flex; align-items: center; gap: 6px; width: 100%; }
+.title-input { flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid #8884; border-radius: 6px; font: inherit; font-weight: 600; background: transparent; color: inherit; }
+.title-edit .btn { flex-shrink: 0; }
 .follow-label { font-size: 12px; font-weight: 600; }
 /* Kebab menu. */
 .kebab { position: relative; }

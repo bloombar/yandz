@@ -138,11 +138,21 @@ async function resolveAssets(patches: AnyPatch[]): Promise<Map<string, string>> 
 function elementSnapshot(el: Element): Record<string, unknown> {
   const attrs: Record<string, string> = {};
   for (const a of Array.from(el.attributes)) attrs[a.name] = a.value;
+  // A few computed styles so the panel's style controls can show current values.
+  const cs = getComputedStyle(el);
+  const styles = {
+    color: cs.color,
+    backgroundColor: cs.backgroundColor,
+    fontSize: cs.fontSize,
+    fontWeight: cs.fontWeight,
+    display: cs.display,
+  };
   return {
     tagName: el.tagName.toLowerCase(),
     text: (el.textContent ?? '').slice(0, 500),
     src: el instanceof HTMLImageElement ? el.src : undefined,
     attrs,
+    styles,
   };
 }
 
@@ -193,8 +203,20 @@ export default defineContentScript({
     /** The active versions for this page (drives the panel's applied bar + per-page
      *  highlight). Includes PAUSED ones (on=false) so the bar can show them as inactive
      *  until removed. Persisted to shared session storage + broadcast for live updates. */
-    function appliedSet(): { scope: Scope; versionId: string; name: string; on: boolean }[] {
-      return activeList.map((a) => ({ scope: a.scope, versionId: a.version.id, name: a.version.name, on: a.on }));
+    function appliedSet(): {
+      scope: Scope;
+      versionId: string;
+      name: string;
+      author: { id: string; handle: string };
+      on: boolean;
+    }[] {
+      return activeList.map((a) => ({
+        scope: a.scope,
+        versionId: a.version.id,
+        name: a.version.name,
+        author: { id: a.version.author.id, handle: a.version.author.handle },
+        on: a.on,
+      }));
     }
 
     function notifyApplied(): void {
@@ -327,6 +349,8 @@ export default defineContentScript({
         case 'yandz:start-picker':
           activeStop?.(); // stop any active drawing first
           activeStop = null;
+          // Starting a new pick clears the panel's previously selected element.
+          void browser.runtime.sendMessage({ type: 'yandz:deselect' }).catch(() => {});
           // Open the inspector. If the picked element has its own text, edit it
           // IN PLACE on the page and send the resulting textReplace patch. For
           // textless elements, fall back to the sidebar editor (CSS/attr/image).
@@ -350,11 +374,26 @@ export default defineContentScript({
             }
           });
           break;
+        case 'yandz:start-style-picker':
+          // Style/attribute editing works on ANY element — unlike the text picker, it
+          // never inline-edits; it always opens the panel's element editor.
+          activeStop?.();
+          activeStop = null;
+          void browser.runtime.sendMessage({ type: 'yandz:deselect' }).catch(() => {});
+          startPicker((el) => {
+            void browser.runtime.sendMessage({
+              type: 'yandz:element-picked',
+              target: fingerprintElement(el),
+              snapshot: elementSnapshot(el),
+            });
+          });
+          break;
         case 'yandz:start-draw':
           // Freehand draw over the page. Strokes auto-emit after a pause (debounced)
           // and on stop, anchored to <body>, so the drawing is saved without an
           // explicit "finish" step.
           activeStop?.(); // replace any prior drawing session
+          void browser.runtime.sendMessage({ type: 'yandz:deselect' }).catch(() => {});
           activeStop = startDrawing({
             color: msg.color,
             debounceMs: AUTOSAVE_DEBOUNCE_MS,

@@ -7,7 +7,7 @@
  * (select element, draw) that start an editing session, plus settings.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Settings as SettingsIcon, Type, Brush } from 'lucide-react';
+import { Settings as SettingsIcon, Type, Brush, Palette } from 'lucide-react';
 import { browser } from 'wxt/browser';
 import {
   Api,
@@ -57,7 +57,7 @@ type View =
       baseAuthorHandle?: string;
       baseName?: string;
       initialTab?: VersionTab;
-      initialTool?: 'pick' | 'draw';
+      initialTool?: 'pick' | 'draw' | 'style';
     }
   | { name: 'settings' };
 
@@ -316,7 +316,10 @@ export function App(): React.JSX.Element {
         (v.scope === 'site' && currentHost === hostOf(v.page.urlKey)) ||
         (v.scope === 'page' && currentPageKey === v.page.urlKey);
       if (here) {
-        setApplied((xs) => [...xs.filter((a) => a.versionId !== v.id), { scope: v.scope, versionId: v.id, name: v.name, on: true }]);
+        setApplied((xs) => [
+          ...xs.filter((a) => a.versionId !== v.id),
+          { scope: v.scope, versionId: v.id, name: v.name, author: { id: v.author.id, handle: v.author.handle }, on: true },
+        ]);
         setAppliedItems((xs) => [v, ...xs.filter((x) => x.id !== v.id)]);
         await messageTab({ type: 'yandz:refresh-activations' });
       } else {
@@ -423,10 +426,14 @@ export function App(): React.JSX.Element {
   const openDetails = (v: FeedItem) => openVersionPanel(v, 'changes');
 
   /** Start (or continue) an editing session with a tool. */
-  const startTool = (tool: 'pick' | 'draw') => {
+  const startTool = (tool: 'pick' | 'draw' | 'style') => {
     if (view.name === 'editor') {
       void messageTab(
-        tool === 'pick' ? { type: 'yandz:start-picker' } : { type: 'yandz:start-draw', color: '#e11' },
+        tool === 'pick'
+          ? { type: 'yandz:start-picker' }
+          : tool === 'style'
+            ? { type: 'yandz:start-style-picker' }
+            : { type: 'yandz:start-draw', color: '#e11' },
       );
     } else {
       // Decide what an edit session does, based on the PAGE version that's applied:
@@ -466,6 +473,9 @@ export function App(): React.JSX.Element {
           <button className="icon-btn" aria-label="Select an element to edit its text" title="Edit text" onClick={() => startTool('pick')}>
             <Type size={16} />
           </button>
+          <button className="icon-btn" aria-label="Select an element to change its style" title="Style an element" onClick={() => startTool('style')}>
+            <Palette size={16} />
+          </button>
           <button className="icon-btn" aria-label="Draw freehand on the page" title="Draw" onClick={() => startTool('draw')}>
             <Brush size={16} />
           </button>
@@ -478,7 +488,7 @@ export function App(): React.JSX.Element {
       {view.name === 'feed' && (
         <>
           {/* Versions currently applied to the open page (all scopes), with toggles. */}
-          {webUrl && <AppliedBar applied={applied} onToggle={onToggle} onRemove={onRemove} onDetails={onAppliedDetails} />}
+          {webUrl && <AppliedBar applied={applied} onToggle={onToggle} onRemove={onRemove} onDetails={onAppliedDetails} onOpenProfile={(userId) => push({ name: 'profile', userId })} />}
 
           {/* Scope tabs: This page / This site / Global. Page/site need a real web page. */}
           <div className="tabs" role="tablist">
