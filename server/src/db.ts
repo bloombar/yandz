@@ -15,3 +15,16 @@ export async function connectDb(uri = config.mongo.uri, dbName = config.mongo.db
 export async function disconnectDb(): Promise<void> {
   await mongoose.disconnect();
 }
+
+/**
+ * Reconcile every registered model's indexes with its current schema: create missing
+ * indexes AND drop stale ones (e.g. an index whose `unique` flag changed between schema
+ * versions). Mongoose's `autoIndex` only ever CREATES indexes, so a changed definition
+ * otherwise lingers in the database and can throw duplicate-key errors at runtime. Intended
+ * for dev/seed; never auto-drop indexes against a production database.
+ */
+export async function syncIndexes(): Promise<void> {
+  for (const model of Object.values(mongoose.models)) {
+    await model.syncIndexes();
+  }
+}

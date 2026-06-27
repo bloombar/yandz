@@ -273,6 +273,32 @@ describe('template matching (apply to all instances)', () => {
     expect(cards.every((c) => c.style.color === '')).toBe(true);
   });
 
+  it('includes the primary target (via the strategy cascade) when the generalized family misses it', () => {
+    // The captured selector required a `.title` class the primary no longer has (drift),
+    // so the generalized family matches only the SIBLING that still has it. Without the
+    // cascade safety net the primary — the user's own element, still resolvable by its id —
+    // would be dropped, making "apply to all" LESS accurate than a single apply.
+    setBody('<div class="card"><h2 id="p">Apple</h2></div><div class="card"><h2 class="title">Apple</h2></div>');
+    const patch: AnyPatch = {
+      op: 'textReplace',
+      order: 0,
+      template: 'auto',
+      target: {
+        cssSelector: '.card:nth-child(1) > h2.title', // stale: the primary lost its .title class
+        attrFingerprint: { id: 'p' }, // still resolves the primary via the cascade
+        ownText: 'Apple',
+        classSig: 'h2|',
+      },
+      payload: { from: 'Apple', to: 'Cherry' },
+    };
+    // Both Apple titles: the still-.title sibling (via the family) AND the primary (via
+    // the cascade) — not just the sibling.
+    const matched = matchTemplate(patch, document);
+    expect(matched).toHaveLength(2);
+    expect(matched.every((e) => e.textContent === 'Apple')).toBe(true);
+    expect(matched.some((e) => e.id === 'p')).toBe(true);
+  });
+
   it('attrChange gate (auto) only sets the attr where the original value matches', () => {
     setBody('<a class="lnk" title="on">1</a><a class="lnk" title="off">2</a><a class="lnk" title="on">3</a>');
     const patch: AnyPatch = {

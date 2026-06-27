@@ -135,6 +135,20 @@ describe('/me/activations', () => {
     expect(active.body.versions[0].on).toBe(true); // re-enabled
   });
 
+  it('allows MANY page activations on the SAME host (different pages) — not one-per-host', async () => {
+    // Guards against a unique {userId,scope,host} index regressing the multi-activation
+    // model: two page versions on the same host must both activate (no duplicate-key error).
+    const author = await makeUser('hostAuthor');
+    const viewer = await makeUser('hostViewer');
+    const a = await makeVersion(author.token, 'https://multi.test/a', 'page');
+    const b = await makeVersion(author.token, 'https://multi.test/b', 'page');
+    expect((await activate(viewer.token, a)).status).toBe(200);
+    expect((await activate(viewer.token, b)).status).toBe(200); // same host, different page
+    // Each is relevant only on its own page.
+    expect(ids(await relevant(viewer.token, 'https://multi.test/a'))).toEqual([a]);
+    expect(ids(await relevant(viewer.token, 'https://multi.test/b'))).toEqual([b]);
+  });
+
   it('cleans up activations when their version is deleted', async () => {
     const author = await makeUser('delAuthor');
     const viewer = await makeUser('delViewer');

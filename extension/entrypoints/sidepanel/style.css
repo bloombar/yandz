@@ -10,8 +10,10 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .edit-tools { display: inline-flex; align-items: center; gap: 4px; border: 1px solid #8884; border-radius: 8px; padding: 2px 8px; }
 .edit-tools-label { font-size: 12px; color: #8889; margin-right: 2px; white-space: nowrap; }
 /* Tabs: underline-style, not buttons. */
-.tabs { display: flex; gap: 16px; padding: 6px 12px 0; border-bottom: 1px solid #8883; }
-.tab { border: none; background: transparent; padding: 6px 2px; cursor: pointer; font: inherit; color: #8889; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+/* Horizontal scroll (no visible scrollbar) keeps all tabs reachable on a narrow panel. */
+.tabs { display: flex; gap: 13px; padding: 6px 12px 0; border-bottom: 1px solid #8883; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { border: none; background: transparent; padding: 6px 2px; cursor: pointer; font: inherit; color: #8889; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; flex: 0 0 auto; }
 .tab[aria-selected="true"] { color: inherit; border-bottom-color: #4c9ffe; font-weight: 600; }
 .tab:disabled { opacity: 0.4; cursor: default; }
 /* In-tab filter chips (left) + sort selector (right). */

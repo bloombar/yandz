@@ -10,7 +10,7 @@
  *   - a viewer who did NOT opt in → nothing applies
  *   - deactivating the global version removes it from the loaded page immediately
  *
- * Prereqs: extension built; server running on :4000; network egress to example.*.
+ * Prereqs: extension built; server running on :4100; network egress to example.*.
  */
 import { test, expect, chromium, type BrowserContext, type Worker } from '@playwright/test';
 import path from 'node:path';
@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXT_PATH = path.resolve(__dirname, '../../extension/output/chrome-mv3');
-const API = 'http://localhost:4000';
+const API = process.env.YZ_API_BASE ?? 'http://localhost:4100';
 
 const SITE_PAGE = 'https://example.com/yz-a'; // where the site version is authored
 const SAME_HOST_OTHER_PAGE = 'https://example.com/yz-b';

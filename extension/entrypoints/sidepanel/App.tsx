@@ -19,6 +19,7 @@ import {
   type FeedTab,
   type FeedFilter,
   type FeedSort,
+  type BookmarkType,
   type PublicUser,
 } from '../../lib/api.js';
 import type { VersionScope } from '@yandz/shared';
@@ -52,30 +53,41 @@ type View =
       editName?: string;
       editScope?: VersionScope;
       editCommentCount?: number;
-      // Deriving from another user's version (creates a new attributed version).
+      // Deriving from another version: a NEW version that carries the base as a dependency
+      // (not a fork/copy, no "based on" lineage).
       baseVersionId?: string;
-      baseAuthorHandle?: string;
-      baseName?: string;
       initialTab?: VersionTab;
       initialTool?: 'pick' | 'draw' | 'style';
     }
   | { name: 'settings' };
 
-const SCOPE_TABS: { key: FeedTab; label: string }[] = [
+/** The top-level tab: the four scope feeds plus the dedicated Bookmarks tab. */
+type TopTab = FeedTab | 'bookmarks';
+
+const SCOPE_TABS: { key: TopTab; label: string }[] = [
   // 'latest' is a cross-page "For you" feed of page modifications (not tied to the
-  // current page); the rest are scope-restricted to the current page/site/everywhere.
+  // current page); the next three are scope-restricted to the current page/site/everywhere;
+  // 'bookmarks' shows the viewer's saved versions across ALL scopes.
   { key: 'latest', label: 'Latest' },
   { key: 'page', label: 'This page' },
   { key: 'site', label: 'This site' },
   { key: 'global', label: 'Global' },
+  { key: 'bookmarks', label: 'Bookmarks' },
 ];
 /** Tabs that require a real web page to resolve (page/site context). */
-const NEEDS_WEB: ReadonlySet<FeedTab> = new Set<FeedTab>(['page', 'site']);
+const NEEDS_WEB: ReadonlySet<TopTab> = new Set<TopTab>(['page', 'site']);
 const FILTERS: { key: FeedFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'following', label: 'Following' },
   { key: 'mine', label: 'Mine' },
   { key: 'bookmarked', label: 'Bookmarked' },
+];
+/** Content-type pills on the Bookmarks tab; 'all' shows every saved version. */
+const BOOKMARK_TYPES: { key: BookmarkType; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'page', label: 'Pages' },
+  { key: 'site', label: 'Sites' },
+  { key: 'global', label: 'Global' },
 ];
 
 async function getActiveTab(): Promise<{ id?: number; url?: string; title?: string }> {
@@ -101,10 +113,12 @@ export function App(): React.JSX.Element {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [url, setUrl] = useState<string | undefined>();
   const [pageTitle, setPageTitle] = useState<string | undefined>();
-  // Feed controls: the tab (Latest / This page / This site / Global), filter, and sort.
-  const [scope, setScope] = useState<FeedTab>('latest');
+  // Feed controls: the tab (Latest / This page / This site / Global / Bookmarks), filter,
+  // and sort. `bookmarkType` is the Bookmarks tab's content-type pill (all/page/site/global).
+  const [scope, setScope] = useState<TopTab>('latest');
   const [filter, setFilter] = useState<FeedFilter>('all');
   const [sort, setSort] = useState<FeedSort>('foryou');
+  const [bookmarkType, setBookmarkType] = useState<BookmarkType>('all');
   const [currentPageKey, setCurrentPageKey] = useState<string | null>(null);
   // The versions currently applied to the open page, per scope (drives the applied bar
   // and row highlighting). Reported by the content script.
@@ -184,11 +198,14 @@ export function App(): React.JSX.Element {
   // One page of the active feed (tab/filter/sort/url/search), for the windowed list.
   const fetchPage = useCallback(
     (offset: number, limit: number): Promise<FeedResult> => {
-      const effScope: FeedTab = !isWebUrl(url) && NEEDS_WEB.has(scope) ? 'latest' : scope;
+      // The Bookmarks tab is cross-scope and sorted by bookmark recency (not the per-tab
+      // filter/sort); its content-type pill narrows by page/site/global.
+      if (scope === 'bookmarks') return Api.getAllBookmarksFeed(bookmarkType, search, offset, limit);
+      const effScope: FeedTab = !isWebUrl(url) && NEEDS_WEB.has(scope) ? 'latest' : (scope as FeedTab);
       if (filter === 'bookmarked') return Api.getBookmarksFeed(effScope, url, search, offset, limit);
       return Api.getFeed(effScope, filter, sort, url, search, offset, limit);
     },
-    [scope, filter, sort, url, search],
+    [scope, filter, sort, url, search, bookmarkType],
   );
 
   // After the first page loads: surface currentPageKey and reflect whatever the content
@@ -217,7 +234,7 @@ export function App(): React.JSX.Element {
     pageSize,
     windowPages: FEED_WINDOW_PAGES,
     thresholdPx: FEED_SCROLL_THRESHOLD_PX,
-    resetKey: `${scope}|${filter}|${sort}|${search}|${url ?? ''}|${pageSize}`,
+    resetKey: `${scope}|${filter}|${sort}|${bookmarkType}|${search}|${url ?? ''}|${pageSize}`,
     enabled: authed === true,
     onFirstPage,
   });
@@ -336,28 +353,37 @@ export function App(): React.JSX.Element {
     if (appliedIds.has(v.id)) {
       setApplied((xs) => xs.filter((a) => a.versionId !== v.id));
       setAppliedItems((xs) => xs.filter((x) => x.id !== v.id));
-      void Api.removeActivation(v.id).catch(() => {});
-      void messageTab({ type: 'yandz:refresh-activations' });
+      // Await the delete before refreshing so the content script's re-fetch sees the
+      // removal (otherwise it reads the still-active state and re-applies it).
+      void (async () => {
+        await Api.removeActivation(v.id).catch(() => {});
+        void messageTab({ type: 'yandz:refresh-activations' });
+      })();
     } else {
       onApply(v);
     }
   };
 
   /** Bar toggle: pause/resume an activation, keeping it in the list. */
-  const onToggle = (e: AppliedEntry) => {
+  const onToggle = async (e: AppliedEntry) => {
     if (e.dependency) return; // dependency rows are read-only — the requiring version controls them
     const next = !e.on;
     setApplied((xs) => xs.map((a) => (a.versionId === e.versionId ? { ...a, on: next } : a)));
-    void Api.setActivationEnabled(e.versionId, next).catch(() => {});
+    // AWAIT the write before refreshing: the content script's refresh re-fetches
+    // /me/activations and broadcasts the result back, so triggering it before the PATCH
+    // commits would read the OLD state and revert the optimistic toggle (the "needs two
+    // clicks" bug).
+    await Api.setActivationEnabled(e.versionId, next).catch(() => {});
     void messageTab({ type: 'yandz:refresh-activations' });
   };
 
   /** Bar ✕: remove the activation entirely. */
-  const onRemove = (e: AppliedEntry) => {
+  const onRemove = async (e: AppliedEntry) => {
     if (e.dependency) return; // can't remove a dependency directly; remove the version that requires it
     setApplied((xs) => xs.filter((a) => a.versionId !== e.versionId));
     setAppliedItems((xs) => xs.filter((x) => x.id !== e.versionId));
-    void Api.removeActivation(e.versionId).catch(() => {});
+    // Await the delete before refreshing (same race as onToggle).
+    await Api.removeActivation(e.versionId).catch(() => {});
     void messageTab({ type: 'yandz:refresh-activations' });
   };
 
@@ -397,8 +423,11 @@ export function App(): React.JSX.Element {
   const onToggleBookmark = async (v: FeedItem) => {
     const on = !v.bookmarked;
     await Api.toggleBookmark(v.id, on).catch(() => {});
+    // On a bookmarks-only list (the Bookmarks tab or the Bookmarked filter), un-bookmarking
+    // removes the row; elsewhere just flip its state.
+    const bookmarksOnly = scope === 'bookmarks' || filter === 'bookmarked';
     setItems((xs) =>
-      filter === 'bookmarked' && !on
+      bookmarksOnly && !on
         ? xs.filter((x) => x.id !== v.id)
         : xs.map((x) => (x.id === v.id ? { ...x, bookmarked: on } : x)),
     );
@@ -466,7 +495,7 @@ export function App(): React.JSX.Element {
         ...(editingOwn
           ? { editVersionId: base!.id, editName: base!.name, editScope: base!.scope }
           : base
-            ? { baseVersionId: base.id, baseAuthorHandle: base.author.handle, baseName: base.name }
+            ? { baseVersionId: base.id }
             : {}),
         initialTool: tool,
       });
@@ -526,20 +555,33 @@ export function App(): React.JSX.Element {
             })}
           </div>
 
-          {/* In-tab filter chips + sort. */}
+          {/* In-tab controls. The Bookmarks tab shows content-type pills (Pages/Sites/Global)
+              and is sorted by bookmark recency; the scope tabs show filter chips + sort. */}
           <div className="feed-controls">
-            <div className="pills">
-              {FILTERS.map((f) => (
-                <button key={f.key} className={`pill ${filter === f.key ? 'active' : ''}`} onClick={() => setFilter(f.key)}>
-                  {f.label}
-                </button>
-              ))}
-            </div>
-            {showSort && (
-              <select className="sort-select" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as FeedSort)}>
-                <option value="foryou">Your feed</option>
-                <option value="latest">Latest</option>
-              </select>
+            {scope === 'bookmarks' ? (
+              <div className="pills">
+                {BOOKMARK_TYPES.map((t) => (
+                  <button key={t.key} className={`pill ${bookmarkType === t.key ? 'active' : ''}`} onClick={() => setBookmarkType(t.key)}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <>
+                <div className="pills">
+                  {FILTERS.map((f) => (
+                    <button key={f.key} className={`pill ${filter === f.key ? 'active' : ''}`} onClick={() => setFilter(f.key)}>
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+                {showSort && (
+                  <select className="sort-select" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as FeedSort)}>
+                    <option value="foryou">Your feed</option>
+                    <option value="latest">Latest</option>
+                  </select>
+                )}
+              </>
             )}
           </div>
 
@@ -585,11 +627,15 @@ export function App(): React.JSX.Element {
                 <p className="muted">No matches for “{search}”.</p>
               ) : (
                 <p className="muted">
-                  {filter === 'bookmarked'
-                    ? 'No bookmarks in this scope yet.'
-                    : filter === 'mine'
-                      ? 'You haven’t made any versions in this scope yet.'
-                      : 'No modifications to show.'}
+                  {scope === 'bookmarks'
+                    ? bookmarkType === 'all'
+                      ? 'No bookmarks yet. Save a version to find it here.'
+                      : `No ${bookmarkType === 'page' ? 'page' : bookmarkType === 'site' ? 'site' : 'global'} bookmarks yet.`
+                    : filter === 'bookmarked'
+                      ? 'No bookmarks in this scope yet.'
+                      : filter === 'mine'
+                        ? 'You haven’t made any versions in this scope yet.'
+                        : 'No modifications to show.'}
                 </p>
               ))}
           </div>
@@ -618,8 +664,6 @@ export function App(): React.JSX.Element {
           editScope={view.editScope}
           commentCount={view.editCommentCount ?? 0}
           baseVersionId={view.baseVersionId}
-          baseAuthorHandle={view.baseAuthorHandle}
-          baseName={view.baseName}
           initialTab={view.initialTab}
           initialTool={view.initialTool}
           activeVersions={applied

@@ -6,7 +6,7 @@
  * opt-in. The viewer authors a site version and activates it (a user may activate their
  * own version), then manages it here.
  *
- * Prereqs: extension built; server on :4000.
+ * Prereqs: extension built; server on :4100.
  */
 import { test, expect, chromium, type BrowserContext, type Worker } from '@playwright/test';
 import path from 'node:path';
@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXT_PATH = path.resolve(__dirname, '../../extension/output/chrome-mv3');
-const API = 'http://localhost:4000';
+const API = process.env.YZ_API_BASE ?? 'http://localhost:4100';
 
 async function json(res: Response): Promise<any> {
   const t = await res.text();

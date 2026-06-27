@@ -3,17 +3,20 @@
  *
  * Idempotent: wipes the app collections in the configured (dev) database and re-inserts
  * a deterministic mock data set — five users; a set of real, scoped versions (page /
- * site / global) across real public pages on a few hosts; a follower graph; votes;
- * bookmarks; and a couple of opt-in activations so every scope tab, feed filter, and the
- * applied-versions bar have content. Versions are backdated so "Latest" and the
- * time-decayed "Your feed" ranking differ.
+ * site / global) across real public pages on a range of hosts (reference sites plus
+ * popular news & culture sites like UnHerd, NYT, the Guardian, BBC, and The Atlantic);
+ * a follower graph; votes; bookmarks; version DEPENDENCIES (versions that bundle + apply
+ * together, including a transitive chain); and opt-in activations — some of dependency-
+ * bearing versions — so every scope tab, feed filter, and the applied-versions bar
+ * (including read-only "required by" rows) have content. Versions are backdated so
+ * "Latest" and the time-decayed "Your feed" ranking differ.
  *
  * Refuses to run against a production database. Run with:
  *   npm run seed --workspace=server
  */
 import bcrypt from 'bcryptjs';
 import { config } from '../config.js';
-import { connectDb, disconnectDb } from '../db.js';
+import { connectDb, disconnectDb, syncIndexes } from '../db.js';
 import { User, Page, Version, Vote, Comment, Follow, Mute, Block, PushSub, Bookmark, Activation } from '../models.js';
 import { pageKey, hostOf } from '../services/url.js';
 import { sanitizePatchList } from '../services/sanitize.js';
@@ -57,6 +60,10 @@ async function seed(): Promise<void> {
 
   await connectDb();
   console.log(`Seeding database "${config.mongo.db}"…`);
+  // Reconcile indexes with the current schema first, so a re-seed also drops any stale
+  // indexes (e.g. a unique constraint that was later relaxed) rather than carrying them
+  // over the wipe (which only deletes documents, not indexes).
+  await syncIndexes();
   await wipe();
 
   // --- Users -------------------------------------------------------------
@@ -102,6 +109,30 @@ async function seed(): Promise<void> {
 
     seeded.push({ id: version._id, authorIdx: spec.authorIdx, scope: spec.scope, host, pageKey: page.urlKey });
   }
+
+  // --- Dependencies: link versions that bundle + apply together. Done in a SECOND pass
+  //     so a spec can depend on any version regardless of insert order. Mirrors the
+  //     server's rule (a version may depend only on equal-or-broader scope) and asserts it.
+  const SCOPE_RANK: Record<VersionScope, number> = { page: 0, site: 1, global: 2 };
+  let dependencyLinks = 0;
+  for (let i = 0; i < VERSION_SPECS.length; i++) {
+    const deps = VERSION_SPECS[i]!.dependsOn;
+    if (!deps?.length) continue;
+    const owner = seeded[i]!;
+    const depIds = deps.map((depIdx) => {
+      const dep = seeded[depIdx];
+      if (!dep) throw new Error(`seed: ${VERSION_SPECS[i]!.name} depends on missing spec index ${depIdx}`);
+      if (depIdx === i) throw new Error(`seed: ${VERSION_SPECS[i]!.name} cannot depend on itself`);
+      if (SCOPE_RANK[dep.scope] < SCOPE_RANK[owner.scope]) {
+        throw new Error(`seed: ${VERSION_SPECS[i]!.name} (${owner.scope}) cannot depend on a narrower '${dep.scope}' version`);
+      }
+      return dep.id;
+    });
+    await Version.updateOne({ _id: owner.id }, { $set: { dependencies: depIds } });
+    dependencyLinks += depIds.length;
+  }
+  console.log(`  ${dependencyLinks} dependency links`);
+
   // Set accurate per-page version counts.
   for (const page of pages) {
     const count = await Version.countDocuments({ pageId: page._id });
@@ -175,6 +206,32 @@ async function seed(): Promise<void> {
       pageKey: plan.scope === 'page' ? v.pageKey : '',
       enabled: true,
     });
+    activationCount++;
+  }
+
+  // Opt a few users into DEPENDENCY-BEARING versions (by spec index → seeded[i]) so the
+  // applied bar shows bundled, read-only "required by …" rows out of the box — including a
+  // transitive chain. Upsert (not create) so it's harmless if the plan above already added it.
+  const dependencyActivations: { userIdx: number; specIdx: number }[] = [
+    { userIdx: 1, specIdx: 0 }, //  grace ← "Friendlier Example" (page) bundles a global tint
+    { userIdx: 2, specIdx: 19 }, // linus ← "UnHerd calmer headline" (page) bundles the UnHerd serif site reader
+    { userIdx: 3, specIdx: 23 }, // margaret ← "NYT Tech declutter" (page) → NYT dark mode (site) → distraction-free (global)
+  ];
+  for (const d of dependencyActivations) {
+    const v = seeded[d.specIdx];
+    if (!v || v.authorIdx === d.userIdx) continue; // never activate your own
+    await Activation.findOneAndUpdate(
+      { userId: users[d.userIdx]!._id, versionId: v.id },
+      {
+        $set: {
+          scope: v.scope,
+          host: v.scope === 'global' ? '' : v.host,
+          pageKey: v.scope === 'page' ? v.pageKey : '',
+          enabled: true,
+        },
+      },
+      { upsert: true, new: true },
+    );
     activationCount++;
   }
   console.log(`  ${activationCount} activations`);

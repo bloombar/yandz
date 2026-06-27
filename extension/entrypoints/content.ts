@@ -370,11 +370,17 @@ export default defineContentScript({
           // textless elements, fall back to the sidebar editor (CSS/attr/image).
           startPicker((el) => {
             if (hasOwnText(el)) {
+              // Fingerprint BEFORE the inline edit mutates the element, so ownText and
+              // textFingerprint capture the ORIGINAL (unedited) text. The template
+              // "same text" content gate and the text-fingerprint fallback both compare
+              // against the original content; capturing after the edit stores the NEW text
+              // and makes "apply to all" reject its own target on a fresh page.
+              const target = fingerprintElement(el);
               startInlineEdit(el, {
                 onCommit: ({ from, to }) => {
                   void browser.runtime.sendMessage({
                     type: 'yandz:text-edited',
-                    target: fingerprintElement(el),
+                    target,
                     payload: { from, to },
                   });
                 },

@@ -13,7 +13,7 @@
  * real bug is fixed.
  *
  * Prereqs: extension built (`npm run build --workspace=@yandz/extension`) and the
- * server + MinIO running on :4000/:9000 (the normal dev stack). Needs network
+ * server + MinIO running on :4100/:9000 (the normal dev stack). Needs network
  * egress to the article URL.
  */
 import { test, expect, chromium } from '@playwright/test';
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXT_PATH = path.resolve(__dirname, '../../extension/output/chrome-mv3');
-const API = 'http://localhost:4000';
+const API = process.env.YZ_API_BASE ?? 'http://localhost:4100';
 const ARTICLE = 'https://unherd.com/2026/06/retiring-the-nutty-professor/?edition=us';
 const TARGET = '.primaryimg img';
 // A 1×1 red PNG — small, valid image bytes for the swap.

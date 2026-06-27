@@ -156,7 +156,15 @@ export function matchTemplate(patch: AnyPatch, doc: Document = document): Elemen
   if (family.length === 0) return single();
   // Gate the family; an empty result means nothing currently matches the original
   // content (e.g. already applied) → no-op, which is correct.
-  return family.filter((el) => passesGate(patch, el));
+  const gated = family.filter((el) => passesGate(patch, el));
+  // Safety net: the family is found ONLY via the generalized css selector, so if that
+  // selector drifted off the original element, the primary target can be missing from the
+  // family even though it resolves fine via the fuller strategy cascade. Resolve it that
+  // way and include it when it passes the gate — so "apply to all" is never LESS accurate
+  // than a single apply.
+  const primary = matchTarget(patch.target, doc).element;
+  if (primary && passesGate(patch, primary) && !gated.includes(primary)) gated.unshift(primary);
+  return gated;
 }
 
 export function matchTarget(target: ElementTarget, doc: Document = document): MatchResult {

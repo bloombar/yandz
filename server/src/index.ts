@@ -7,12 +7,16 @@ import { createServer } from 'node:http';
 import { Server as SocketIOServer } from 'socket.io';
 import { config } from './config.js';
 import { createApp } from './app.js';
-import { connectDb } from './db.js';
+import { connectDb, syncIndexes } from './db.js';
 import { ensureBucket } from './services/s3.js';
 import { setIo, versionRoom, pageRoom } from './realtime/io.js';
 
 async function main(): Promise<void> {
   await connectDb();
+  // Dev/seed self-heal: reconcile indexes so a changed definition (e.g. a unique flag that
+  // was relaxed) can't linger and throw duplicate-key errors. Skipped in prod, where index
+  // changes are applied deliberately via migrations, not dropped on boot.
+  if (!config.isProd) await syncIndexes().catch((err) => console.warn('syncIndexes skipped:', err.message));
   // In dev this creates the local MinIO bucket if missing; harmless if it exists.
   await ensureBucket().catch((err) => console.warn('ensureBucket skipped:', err.message));
 

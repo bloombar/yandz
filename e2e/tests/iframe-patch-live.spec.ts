@@ -6,7 +6,7 @@
  * iframe patches itself from its own URL's versions — independently of the outer
  * frame — so the iframe's <h1> changes while the outer <h1> does not.
  *
- * Prereqs: extension built; server on :4000; network egress to example.com/.net.
+ * Prereqs: extension built; server on :4100; network egress to example.com/.net.
  */
 import { test, expect, chromium, type BrowserContext, type Worker } from '@playwright/test';
 import path from 'node:path';
@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXT_PATH = path.resolve(__dirname, '../../extension/output/chrome-mv3');
-const API = 'http://localhost:4000';
+const API = process.env.YZ_API_BASE ?? 'http://localhost:4100';
 const ORIGINAL = 'Example Domain';
 
 async function json(res: Response): Promise<any> {

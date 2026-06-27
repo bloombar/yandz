@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXT_PATH = path.resolve(__dirname, '../../extension/output/chrome-mv3');
-const API = 'http://localhost:4000';
+const API = process.env.YZ_API_BASE ?? 'http://localhost:4100';
 const ARTICLE = 'https://unherd.com/2026/06/retiring-the-nutty-professor/?edition=us';
 const TARGET = '.primaryimg img';
 const PNG_RED_1x1 =

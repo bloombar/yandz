@@ -51,7 +51,7 @@ export function loadConfig(): AppConfig {
   return {
     isProd,
     isTest,
-    port: Number(env('PORT', '4000')),
+    port: Number(env('PORT', '4100')),
     mongo: {
       uri: env('MONGO_URI', 'mongodb://localhost:27017'),
       db: env('MONGO_DB', isProd ? 'yandz' : isTest ? 'yandz_test' : 'yandz_dev'),

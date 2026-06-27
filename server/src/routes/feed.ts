@@ -7,7 +7,9 @@
  * (personalized) / Latest.
  *
  *  - GET /feed?scope=page|site|global&filter=all|following|mine&sort=foryou|latest&url=&q=
- *  - GET /feed/bookmarks?scope=page|site|global&url=&q=   (requires auth)
+ *  - GET /feed/bookmarks?scope=page|site|global&url=&q=          (requires auth)
+ *  - GET /feed/bookmarks/all?type=all|page|site|global&q=        (requires auth) — every
+ *      saved version across all scopes, newest-bookmarked first (the Bookmarks tab).
  */
 import { Router, type Request, type Response } from 'express';
 import { Types } from 'mongoose';
@@ -193,4 +195,38 @@ feedRouter.get('/bookmarks', requireAuth, async (req: Request, res: Response) =>
   const pageDocs = ordered.slice(offset, offset + limit);
 
   res.json({ currentPageKey, versions: await serializeVersions(pageDocs, req.userId!), hasMore });
+});
+
+// GET /feed/bookmarks/all — EVERY saved version across ALL scopes (page, site, and global),
+// not restricted to the current page/host, newest-bookmarked first. `type` narrows by
+// content type (page|site|global); omitted/'all' returns them all. Drives the dedicated
+// Bookmarks tab and its Pages/Sites/Global pills.
+const asType = (v: unknown): VersionScope | 'all' =>
+  v === 'page' || v === 'site' || v === 'global' ? v : 'all';
+
+feedRouter.get('/bookmarks/all', requireAuth, async (req: Request, res: Response) => {
+  const type = asType(req.query.type);
+  const clauses = await searchClauses(String(req.query.q ?? ''));
+  const { offset, limit } = pageParams(req);
+
+  const [social, marks] = await Promise.all([
+    loadViewerSocial(req.userId!),
+    Bookmark.find({ userId: new Types.ObjectId(req.userId!) }).sort({ createdAt: -1, _id: -1 }).limit(CANDIDATE_CAP).lean(),
+  ]);
+  const versionIds = marks.map((m) => m.versionId);
+
+  const filter: Record<string, unknown> = { _id: { $in: versionIds } };
+  if (type !== 'all') filter.scope = type;
+  if (clauses.length) filter.$or = clauses;
+  const docs = await Version.find(filter).lean();
+
+  // Preserve bookmark recency order, drop blocked authors, THEN paginate.
+  const byId = new Map(docs.map((d) => [String(d._id), d as unknown as RawVersion]));
+  const ordered = versionIds
+    .map((id) => byId.get(String(id)))
+    .filter((v): v is RawVersion => !!v && !social.blockSet.has(String(v.authorId)));
+  const hasMore = ordered.length > offset + limit;
+  const pageDocs = ordered.slice(offset, offset + limit);
+
+  res.json({ currentPageKey: null, versions: await serializeVersions(pageDocs, req.userId!), hasMore });
 });

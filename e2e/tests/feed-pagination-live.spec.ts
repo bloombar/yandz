@@ -10,7 +10,7 @@
  * (Per-page block filtering is covered authoritatively by the server unit test
  * feed-pagination.test.ts; the author-scoped "Mine" filter can't exercise it.)
  *
- * Prereqs: extension built; server on :4000.
+ * Prereqs: extension built; server on :4100.
  */
 import { test, expect, chromium, type BrowserContext, type Worker } from '@playwright/test';
 import path from 'node:path';
@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXT_PATH = path.resolve(__dirname, '../../extension/output/chrome-mv3');
-const API = 'http://localhost:4000';
+const API = process.env.YZ_API_BASE ?? 'http://localhost:4100';
 
 const PAGE_SIZE = 5;
 const WINDOW_PAGES = 4; // must match FEED_WINDOW_PAGES default

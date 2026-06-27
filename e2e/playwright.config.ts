@@ -12,7 +12,7 @@ export default defineConfig({
   timeout: 60_000,
   fullyParallel: false, // a persistent context per worker is heavy
   use: {
-    baseURL: 'http://localhost:4000',
+    baseURL: process.env.YZ_API_BASE ?? 'http://localhost:4100',
   },
   reporter: [['list']],
 });

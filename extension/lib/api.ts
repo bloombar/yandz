@@ -1,12 +1,17 @@
 /**
  * Typed API client used by the side panel and content script. The JWT is kept in
  * chrome.storage.session (cleared when the browser restarts) and attached to every
- * request. The base URL comes from the build-time env (dev server vs prod).
+ * request.
+ *
+ * The API origin (host + PORT) is configurable at build time via the `VITE_API_BASE`
+ * env var (set it in extension/.env — see .env.example), e.g.
+ * `VITE_API_BASE=http://localhost:4100`. It must match the server's PORT. Defaults to the
+ * local dev server on :4100 when unset.
  */
 import { browser } from 'wxt/browser';
 import type { AnyPatch, VersionScope } from '@yandz/shared';
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:4000';
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:4100';
 
 export interface PublicUser {
   id: string;
@@ -71,6 +76,9 @@ export type FeedScope = 'page' | 'site' | 'global';
 export type FeedTab = 'latest' | FeedScope;
 /** The in-tab filter chips. 'bookmarked' is served by the bookmarks endpoint. */
 export type FeedFilter = 'all' | 'following' | 'mine' | 'bookmarked';
+
+/** Content-type filter for the Bookmarks tab's pills ('all' shows every saved version). */
+export type BookmarkType = 'all' | 'page' | 'site' | 'global';
 
 /** Read the stored auth token (session-scoped). */
 export async function getToken(): Promise<string | null> {
@@ -183,6 +191,11 @@ export const Api = {
   // The viewer's bookmarked versions within a tab (the "Bookmarked" filter chip).
   getBookmarksFeed: (scope: FeedTab, url?: string, q?: string, offset?: number, limit?: number) =>
     api<FeedResult>(`/feed/bookmarks?scope=${scope}&url=${encodeURIComponent(url ?? '')}${pageQuery(q, offset, limit)}`),
+
+  // Every saved version across ALL scopes (the dedicated Bookmarks tab), newest-bookmarked
+  // first. `type` filters by content type (page/site/global) for the tab's pills.
+  getAllBookmarksFeed: (type: BookmarkType, q?: string, offset?: number, limit?: number) =>
+    api<FeedResult>(`/feed/bookmarks/all?type=${type}${pageQuery(q, offset, limit)}`),
 
   toggleBookmark: (id: string, on: boolean) =>
     api<{ bookmarked: boolean }>(`/versions/${id}/bookmark`, { method: on ? 'POST' : 'DELETE' }),

@@ -84,11 +84,9 @@ interface Props {
   editScope?: VersionScope;
   /** Comment count for the tab label (from the feed item); 0 for a new version. */
   commentCount?: number;
+  /** A version this new one is DERIVED FROM: not forked or copied — pre-selected as a
+   *  dependency and used to inherit its declared dependencies. No "based on" lineage. */
   baseVersionId?: string;
-  /** Handle of the base version's author, shown in the header ("based on … by u/x"). */
-  baseAuthorHandle?: string;
-  /** Title of the base version, shown in the header. */
-  baseName?: string;
   /** Which tab to show first (editing defaults to Changes). */
   initialTab?: VersionTab;
   /** Tool to auto-start on mount, when launched from a top-nav tool icon. */
@@ -113,8 +111,6 @@ export function Editor({
   editScope,
   commentCount = 0,
   baseVersionId,
-  baseAuthorHandle,
-  baseName,
   initialTab = 'changes',
   initialTool,
   activeVersions = [],
@@ -292,9 +288,11 @@ export function Editor({
       const vScope = scopeRef.current;
       const vDeps = dependenciesRef.current;
       if (versionIdRef.current == null) {
-        const res = baseVersionId
-          ? await Api.forkVersion(baseVersionId, { url, title: pageTitle, name: vName, patches: patchSet, scope: vScope, dependencies: vDeps })
-          : await Api.createVersion({ url, title: pageTitle, name: vName, patches: patchSet, scope: vScope, dependencies: vDeps });
+        // Always a brand-new version — never a fork. Under the dependency model a new
+        // version contains only the author's own edits; any version it was derived from
+        // is carried as a DEPENDENCY (in vDeps), not copied and not recorded as a fork
+        // parent. So there's no "based on / forked" lineage here.
+        const res = await Api.createVersion({ url, title: pageTitle, name: vName, patches: patchSet, scope: vScope, dependencies: vDeps });
         versionIdRef.current = res.id;
         setSavedVersionId(res.id); // enable the Comments tab now the version exists
         // Show the server's (possibly auto-generated) name so the user can see and
@@ -474,11 +472,6 @@ export function Editor({
               <button className="icon-btn" aria-label="Rename version" title="Rename" onClick={beginRename}>
                 <Pencil size={13} />
               </button>
-              {!editVersionId && baseVersionId && (
-                <span className="muted">
-                  , based on “{baseName ?? 'a version'}” by u/{baseAuthorHandle ?? 'another'}
-                </span>
-              )}
             </span>
           )
         }
