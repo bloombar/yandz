@@ -103,7 +103,9 @@ describe('dependency persistence + resolved read', () => {
 
     const got = await request(app).get(`/versions/${p}`).set(auth(u.token));
     expect(got.status).toBe(200);
-    expect(got.body.dependencies).toEqual([{ id: g, name: 'Global one', scope: 'global' }]);
+    expect(got.body.dependencies).toEqual([
+      { id: g, name: 'Global one', scope: 'global', author: { id: u.id, handle: 'depRead' } },
+    ]);
 
     // Deleting the dependency makes it silently disappear from the resolved list.
     await request(app).delete(`/versions/${g}`).set(auth(u.token)).expect(200);

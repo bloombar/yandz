@@ -35,11 +35,17 @@ type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
  *  versions of equal-or-broader scope: page→page/site/global, site→site/global, etc.). */
 const SCOPE_RANK: Record<VersionScope, number> = { page: 0, site: 1, global: 2 };
 
+/** A version offered in the "Bundle with" dependency picker. */
+interface DepCandidate {
+  id: string;
+  name: string;
+  scope: VersionScope;
+  /** Author handle, shown as u/handle next to the title (may be absent). */
+  author?: { id: string; handle: string };
+}
+
 /** Merge resolved dependency descriptors into a candidate list, de-duping by id. */
-function mergeDepCandidates(
-  cur: { id: string; name: string; scope: VersionScope }[],
-  incoming: { id: string; name: string; scope: VersionScope }[],
-): { id: string; name: string; scope: VersionScope }[] {
+function mergeDepCandidates(cur: DepCandidate[], incoming: DepCandidate[]): DepCandidate[] {
   const byId = new Map(cur.map((c) => [c.id, c]));
   for (const d of incoming) if (!byId.has(d.id)) byId.set(d.id, d);
   return [...byId.values()];
@@ -93,7 +99,7 @@ interface Props {
   initialTool?: 'pick' | 'draw' | 'style';
   /** The viewer's currently-active versions (enabled, non-dependency), offered as
    *  candidate dependencies to bundle with this one. The currently-applied base is here. */
-  activeVersions?: { id: string; name: string; scope: VersionScope }[];
+  activeVersions?: DepCandidate[];
   /** Returns false when the content script isn't reachable on the active tab. */
   messageTab: (payload: unknown) => Promise<boolean>;
   /** Called with the new version's id and chosen scope after a successful save. */
@@ -130,8 +136,8 @@ export function Editor({
   // Other versions bundled + applied together with this one. Candidates come from the
   // viewer's currently-active versions (the base is one of them) plus any the base/own
   // version already declares; only those at an equal-or-broader scope are eligible.
-  const [depCandidates, setDepCandidates] = useState<{ id: string; name: string; scope: VersionScope }[]>(() =>
-    activeVersions.filter((v) => v.id !== editVersionId).map((v) => ({ id: v.id, name: v.name, scope: v.scope })),
+  const [depCandidates, setDepCandidates] = useState<DepCandidate[]>(() =>
+    activeVersions.filter((v) => v.id !== editVersionId).map((v) => ({ id: v.id, name: v.name, scope: v.scope, author: v.author })),
   );
   // Pre-select every eligible active version by default (editable below).
   const [dependencies, setDependencies] = useState<string[]>(() =>
@@ -530,6 +536,7 @@ export function Editor({
                       {d.scope === 'page' ? 'Page' : d.scope === 'site' ? 'Site' : 'Global'}
                     </span>
                     <span className="dependency-name">{d.name}</span>
+                    {d.author?.handle && <span className="dependency-author muted">u/{d.author.handle}</span>}
                   </label>
                 ))}
               </div>

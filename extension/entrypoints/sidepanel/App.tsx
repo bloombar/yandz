@@ -668,7 +668,7 @@ export function App(): React.JSX.Element {
           initialTool={view.initialTool}
           activeVersions={applied
             .filter((a) => a.on && !a.dependency)
-            .map((a) => ({ id: a.versionId, name: a.name, scope: a.scope as VersionScope }))}
+            .map((a) => ({ id: a.versionId, name: a.name, scope: a.scope as VersionScope, author: a.author }))}
           messageTab={messageTab}
           onSaved={async (newId) => {
             // Activate the just-saved version so the author sees it applied, then refresh.

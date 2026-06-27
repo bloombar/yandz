@@ -46,9 +46,13 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .scope-chip.scope-site { background: #2f9e44; }
 .scope-chip.scope-global { background: #9c36b5; }
 /* Dependencies picker in the editor: checkbox + scope chip + version name per row. */
-.dependency-option { display: flex; align-items: center; gap: 6px; padding: 3px 0; cursor: pointer; font-size: 13px; }
-.dependency-option input { margin: 0; }
-.dependency-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dependency-option { display: flex; align-items: center; gap: 6px; padding: 2px 0; cursor: pointer; font-size: 13px; }
+/* Reset the generic `.field input { width:100%; padding; border }` styling so the checkbox
+   renders at its native size, hard against the left edge (not a full-width bordered box
+   that shoves the title/username off to the right). */
+.dependency-option input[type='checkbox'] { flex: 0 0 auto; width: auto; margin: 0; padding: 0; border: none; }
+.dependency-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dependency-author { flex: 0 0 auto; font-size: 12px; }
 /* Infinite-scroll loading sentinel (top/bottom of the windowed list). */
 .feed-sentinel { text-align: center; padding: 10px 12px; font-size: 12px; }
 /* Settings → Site-specific changes: collapsible per-site groups. */

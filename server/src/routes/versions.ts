@@ -7,7 +7,7 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { Types } from 'mongoose';
-import { Page, Version, Vote, Comment, Bookmark, Activation } from '../models.js';
+import { Page, Version, Vote, Comment, Bookmark, Activation, User } from '../models.js';
 import { requireAuth } from '../lib/auth.js';
 import { pageKey, hostOf } from '../services/url.js';
 import { sanitizePatchList } from '../services/sanitize.js';
@@ -252,17 +252,28 @@ versionsRouter.get('/:id', async (req, res) => {
     res.status(404).json({ error: 'not found' });
     return;
   }
-  // Resolve dependencies for the editor (skip any whose Version was deleted).
+  // Resolve dependencies for the editor (skip any whose Version was deleted), including
+  // each dependency's author handle so the picker can show "name · u/handle".
   const depDocs = v.dependencies?.length
-    ? await Version.find({ _id: { $in: v.dependencies } }).select('name scope').lean()
+    ? await Version.find({ _id: { $in: v.dependencies } }).select('name scope authorId').lean()
     : [];
+  const depAuthorIds = [...new Set(depDocs.map((d) => String(d.authorId)))];
+  const depAuthors = depAuthorIds.length
+    ? await User.find({ _id: { $in: depAuthorIds } }).select('handle').lean()
+    : [];
+  const handleById = new Map(depAuthors.map((u) => [String(u._id), u.handle]));
   res.json({
     id: String(v._id),
     name: v.name,
     authorId: String(v.authorId),
     patches: v.patches,
     scope: v.scope ?? 'page',
-    dependencies: depDocs.map((d) => ({ id: String(d._id), name: d.name, scope: d.scope ?? 'page' })),
+    dependencies: depDocs.map((d) => ({
+      id: String(d._id),
+      name: d.name,
+      scope: d.scope ?? 'page',
+      author: { id: String(d.authorId), handle: handleById.get(String(d.authorId)) ?? '' },
+    })),
     parentVersionId: v.parentVersionId ? String(v.parentVersionId) : null,
     rootVersionId: v.rootVersionId ? String(v.rootVersionId) : null,
     up: v.up,

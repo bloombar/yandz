@@ -209,7 +209,7 @@ export const Api = {
       patches: AnyPatch[];
       scope: VersionScope;
       /** Versions this one bundles + applies together, resolved to display info. */
-      dependencies?: { id: string; name: string; scope: VersionScope }[];
+      dependencies?: { id: string; name: string; scope: VersionScope; author: { id: string; handle: string } }[];
       parentVersionId: string | null;
     }>(`/versions/${id}`),
 
