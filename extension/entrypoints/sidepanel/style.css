@@ -53,6 +53,14 @@ body { margin: 0; font: 13px/1.4 system-ui, sans-serif; }
 .dependency-option input[type='checkbox'] { flex: 0 0 auto; width: auto; margin: 0; padding: 0; border: none; }
 .dependency-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dependency-author { flex: 0 0 auto; font-size: 12px; }
+/* Selected dependencies: a draggable, reorderable list (applies bottom→top, top wins). */
+.dependency-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.dependency-row { display: flex; align-items: center; gap: 6px; padding: 3px 4px; font-size: 13px; border: 1px solid transparent; border-radius: 6px; background: #8881; }
+.dependency-row.dragging { opacity: 0.5; }
+.drag-handle { flex: 0 0 auto; display: inline-flex; color: #8889; cursor: grab; }
+.dependency-row .dep-remove { flex: 0 0 auto; margin-left: auto; color: #8889; }
+.dependency-row .dep-remove:hover { color: #e74c3c; }
+.dep-add-label { display: block; font-size: 11px; margin: 4px 0 2px; }
 /* Infinite-scroll loading sentinel (top/bottom of the windowed list). */
 .feed-sentinel { text-align: center; padding: 10px 12px; font-size: 12px; }
 /* Settings → Site-specific changes: collapsible per-site groups. */

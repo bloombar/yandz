@@ -8,8 +8,9 @@
  * otherwise it creates a brand-new version.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { X, Trash2, ChevronRight, Pencil } from 'lucide-react';
+import { X, Trash2, ChevronRight, Pencil, GripVertical } from 'lucide-react';
 import { browser } from 'wxt/browser';
+import { moveBefore } from '../../../lib/reorder.js';
 import { Api } from '../../../lib/api.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../../lib/config.js';
 import {
@@ -139,12 +140,17 @@ export function Editor({
   const [depCandidates, setDepCandidates] = useState<DepCandidate[]>(() =>
     activeVersions.filter((v) => v.id !== editVersionId).map((v) => ({ id: v.id, name: v.name, scope: v.scope, author: v.author })),
   );
-  // Pre-select every eligible active version by default (editable below).
+  // Selected dependencies, in DISPLAY order (top of the list first). The author controls
+  // this order by drag-and-drop; the TOP entry is applied LAST so it wins where versions
+  // overlap (the list applies bottom→top). Pre-select every eligible active version by
+  // default. (Persistence reverses this into the stored "apply order" array; see persist.)
   const [dependencies, setDependencies] = useState<string[]>(() =>
     activeVersions
       .filter((v) => v.id !== editVersionId && SCOPE_RANK[v.scope] >= SCOPE_RANK[editScope ?? 'page'])
       .map((v) => v.id),
   );
+  // The dependency row currently being dragged (for reordering), or null.
+  const [dragDepId, setDragDepId] = useState<string | null>(null);
   const [tab, setTab] = useState<VersionTab>(initialTab);
   // The saved version id (reactive mirror of versionIdRef) for the Comments tab.
   const [savedVersionId, setSavedVersionId] = useState<string | null>(editVersionId ?? null);
@@ -194,10 +200,26 @@ export function Editor({
     );
   };
 
-  /** Toggle whether a candidate version is bundled as a dependency. */
-  const toggleDependency = (id: string) => {
+  /** Add a candidate as a dependency. New ones go to the BOTTOM of the list (lowest
+   *  priority) so adding one never silently overrides the existing selections. */
+  const addDependency = (id: string) => {
     dirtyRef.current = true;
-    setDependencies((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+    setDependencies((cur) => (cur.includes(id) ? cur : [...cur, id]));
+  };
+
+  /** Remove a dependency from the bundle. */
+  const removeDependency = (id: string) => {
+    dirtyRef.current = true;
+    setDependencies((cur) => cur.filter((x) => x !== id));
+  };
+
+  /** Drag-reorder: move the dragged dependency to just before the one it's dragged over. */
+  const reorderDependency = (srcId: string, targetId: string) => {
+    setDependencies((cur) => {
+      const next = moveBefore(cur, srcId, targetId);
+      if (next !== cur) dirtyRef.current = true; // a real move → persist the new order
+      return next;
+    });
   };
 
   const addPatch = (p: Omit<AnyPatch, 'order'>) => {
@@ -244,7 +266,9 @@ export function Editor({
           setPatches(v.patches.map((p, i) => ({ ...p, order: i })));
           const deps = v.dependencies ?? [];
           setDepCandidates((cur) => mergeDepCandidates(cur, deps));
-          setDependencies(deps.map((d) => d.id)); // the version's stored deps are authoritative
+          // Stored order is APPLY order (last = applied last = wins); reverse it so the
+          // display list shows the winner on top. The stored deps are authoritative.
+          setDependencies([...deps.map((d) => d.id)].reverse());
         })
         .catch(() => {});
     } else if (baseVersionId) {
@@ -254,7 +278,8 @@ export function Editor({
           const deps = v.dependencies ?? [];
           if (!deps.length) return;
           setDepCandidates((cur) => mergeDepCandidates(cur, deps));
-          setDependencies((cur) => [...new Set([...cur, ...deps.map((d) => d.id)])]);
+          // Reverse stored→display, then append any not already selected.
+          setDependencies((cur) => [...new Set([...cur, ...[...deps.map((d) => d.id)].reverse()])]);
         })
         .catch(() => {});
     }
@@ -292,7 +317,10 @@ export function Editor({
       // random two-word name otherwise.
       const vName = nameRef.current.trim() || undefined;
       const vScope = scopeRef.current;
-      const vDeps = dependenciesRef.current;
+      // dependenciesRef is DISPLAY order (top = highest priority). Stored order is APPLY
+      // order, where later entries are applied later and override earlier ones — so reverse
+      // it: the top of the list becomes the LAST applied (and therefore wins).
+      const vDeps = [...dependenciesRef.current].reverse();
       if (versionIdRef.current == null) {
         // Always a brand-new version — never a fork. Under the dependency model a new
         // version contains only the author's own edits; any version it was derived from
@@ -515,30 +543,80 @@ export function Editor({
           </div>
 
           {/* Dependencies: other active versions to bundle + apply together with this one.
-              Only versions of equal-or-broader scope are eligible. */}
+              Only versions of equal-or-broader scope are eligible. The author orders the
+              selected ones by drag-and-drop; they apply bottom→top, so the TOP one wins
+              where versions overlap. */}
           {(() => {
-            const eligible = depCandidates.filter((d) => SCOPE_RANK[d.scope] >= SCOPE_RANK[scope]);
-            if (eligible.length === 0) return null;
+            const eligibleId = (id: string) => {
+              const c = depCandidates.find((d) => d.id === id);
+              return !!c && SCOPE_RANK[c.scope] >= SCOPE_RANK[scope];
+            };
+            const scopeLabel = (s: VersionScope) => (s === 'page' ? 'Page' : s === 'site' ? 'Site' : 'Global');
+            // Selected deps in DISPLAY order (top first); addable = remaining eligible candidates.
+            const selected = dependencies
+              .filter(eligibleId)
+              .map((id) => depCandidates.find((d) => d.id === id)!)
+              .filter(Boolean);
+            const addable = depCandidates.filter(
+              (d) => SCOPE_RANK[d.scope] >= SCOPE_RANK[scope] && !dependencies.includes(d.id),
+            );
+            if (selected.length === 0 && addable.length === 0) return null;
             return (
               <div className="field dependencies-field">
                 <label>Bundle with</label>
                 <p className="field-hint muted" style={{ marginTop: 0 }}>
                   These versions are applied together with yours whenever someone uses it.
+                  {selected.length > 1 && ' Drag to reorder — applied bottom to top, so the top one wins where they overlap.'}
                 </p>
-                {eligible.map((d) => (
-                  <label className="dependency-option" key={d.id}>
-                    <input
-                      type="checkbox"
-                      checked={dependencies.includes(d.id)}
-                      onChange={() => toggleDependency(d.id)}
-                    />
-                    <span className={`scope-chip scope-${d.scope}`}>
-                      {d.scope === 'page' ? 'Page' : d.scope === 'site' ? 'Site' : 'Global'}
-                    </span>
-                    <span className="dependency-name">{d.name}</span>
-                    {d.author?.handle && <span className="dependency-author muted">u/{d.author.handle}</span>}
-                  </label>
-                ))}
+                {selected.length > 0 && (
+                  <ul className="dependency-list">
+                    {selected.map((d) => (
+                      <li
+                        key={d.id}
+                        className={`dependency-row ${dragDepId === d.id ? 'dragging' : ''}`}
+                        draggable
+                        onDragStart={(e) => {
+                          setDragDepId(d.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          if (dragDepId && dragDepId !== d.id) reorderDependency(dragDepId, d.id);
+                        }}
+                        onDragEnd={() => setDragDepId(null)}
+                      >
+                        <span className="drag-handle" aria-hidden="true" title="Drag to reorder">
+                          <GripVertical size={14} />
+                        </span>
+                        <span className={`scope-chip scope-${d.scope}`}>{scopeLabel(d.scope)}</span>
+                        <span className="dependency-name">{d.name}</span>
+                        {d.author?.handle && <span className="dependency-author muted">u/{d.author.handle}</span>}
+                        <button
+                          type="button"
+                          className="icon-btn dep-remove"
+                          aria-label={`Remove ${d.name}`}
+                          title="Remove from bundle"
+                          onClick={() => removeDependency(d.id)}
+                        >
+                          <X size={13} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {addable.length > 0 && (
+                  <>
+                    {selected.length > 0 && <span className="dep-add-label muted">Add another</span>}
+                    {addable.map((d) => (
+                      <label className="dependency-option" key={d.id}>
+                        <input type="checkbox" checked={false} onChange={() => addDependency(d.id)} />
+                        <span className={`scope-chip scope-${d.scope}`}>{scopeLabel(d.scope)}</span>
+                        <span className="dependency-name">{d.name}</span>
+                        {d.author?.handle && <span className="dependency-author muted">u/{d.author.handle}</span>}
+                      </label>
+                    ))}
+                  </>
+                )}
               </div>
             );
           })()}
