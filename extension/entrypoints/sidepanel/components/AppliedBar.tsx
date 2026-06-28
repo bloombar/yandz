@@ -8,6 +8,7 @@
 import React from 'react';
 import { ToggleRight, ToggleLeft, X } from 'lucide-react';
 import type { FeedScope } from '../../../lib/api.js';
+import { orderAppliedRows } from '../../../lib/applied-order.js';
 
 /** One activated version relevant to the current page (per the content script). */
 export interface AppliedEntry {
@@ -26,8 +27,6 @@ export interface AppliedEntry {
 }
 
 const SCOPE_LABEL: Record<FeedScope, string> = { page: 'Page', site: 'Site', global: 'Global' };
-// Stable display order: page (top layer) first, then site, then global.
-const ORDER: Record<FeedScope, number> = { page: 0, site: 1, global: 2 };
 
 interface Props {
   applied: AppliedEntry[];
@@ -39,7 +38,9 @@ interface Props {
 
 export function AppliedBar({ applied, onToggle, onRemove, onDetails, onOpenProfile }: Props): React.JSX.Element | null {
   if (applied.length === 0) return null;
-  const rows = [...applied].sort((a, b) => ORDER[a.scope] - ORDER[b.scope]);
+  // Top→bottom = highest→lowest priority: page over site over global, and within a scope
+  // the last-applied (a version applied after its dependency) sits on top.
+  const rows = orderAppliedRows(applied);
   return (
     <div className="applied-bar">
       <span className="applied-bar-label muted">Applied here</span>
