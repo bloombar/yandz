@@ -50,7 +50,7 @@ export default defineBackground(() => {
 
   // The content-script floating icon posts this to toggle the panel.
   browser.runtime.onMessage.addListener((msg: unknown, sender: { tab?: { windowId?: number } }) => {
-    const m = msg as { type?: string; url?: string; title?: string };
+    const m = msg as { type?: string; url?: string; title?: string; versionId?: string };
     if (m?.type === 'yandz:open-panel') {
       void openPanel(sender.tab?.windowId);
     } else if (m?.type === 'yandz:register-push') {
@@ -79,6 +79,13 @@ export default defineBackground(() => {
               .catch(() => [])
           : [],
       );
+    } else if (m?.type === 'yandz:activate-version' && m.versionId) {
+      // Opt the viewer into a version shared via deep link (#yandz-v=<id>). Idempotent.
+      // The server's activation expansion then pulls in the version's dependencies and
+      // resolves its scope (page/site/global) when the content script next reads
+      // /me/activations. No-op when logged out. Resolves true/false so the caller can wait.
+      const id = m.versionId;
+      return getToken().then((t) => (t ? Api.activate(id).then(() => true).catch(() => false) : false));
     }
     return undefined;
   });

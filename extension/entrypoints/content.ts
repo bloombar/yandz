@@ -32,6 +32,24 @@ async function getVersions(url: string): Promise<PageVersions | null> {
   })) as PageVersions | null;
 }
 
+/** Extract a shared version id from a `#yandz-v=<id>` deep link (anywhere in the hash). */
+function sharedVersionId(): string | null {
+  const m = /yandz-v=([A-Za-z0-9]+)/.exec(location.hash);
+  return m ? m[1]! : null;
+}
+
+/** Remove the `yandz-v=<id>` tag from the URL (keeping any other hash content) without a
+ *  reload, so the shared version persists via its activation and the URL stays clean. */
+function stripShareFragment(): void {
+  const cleaned = location.hash.replace(/[#&]?yandz-v=[A-Za-z0-9]+/, '');
+  const hash = cleaned && cleaned !== '#' ? cleaned : '';
+  try {
+    history.replaceState(null, '', location.pathname + location.search + hash);
+  } catch {
+    /* replaceState can throw on some restricted documents — harmless to skip */
+  }
+}
+
 /** The viewer's activations relevant to this URL (each tagged on/off), via background. */
 async function getActivations(url: string): Promise<ActiveItem[]> {
   try {
@@ -456,6 +474,19 @@ export default defineContentScript({
     // / tiny tracker iframes — skip those entirely (no fetch, no apply) to avoid
     // needless requests. (The top frame is always an http(s) page.)
     if (!/^https?:\/\//.test(location.href)) return;
+
+    // Shared deep link (#yandz-v=<id>): opt the viewer into that version BEFORE reading the
+    // active set, so it — and its dependencies — load here regardless of scope (the server's
+    // activation expansion handles page/site/global + deps). Top frame only; idempotent;
+    // a no-op when logged out. Then strip the tag so the URL is clean and refreshes still
+    // show it (via the persisted activation).
+    if (isTop) {
+      const shared = sharedVersionId();
+      if (shared) {
+        await browser.runtime.sendMessage({ type: 'yandz:activate-version', versionId: shared }).catch(() => {});
+        stripShareFragment();
+      }
+    }
 
     // Fetch this frame's page versions (for the floating-icon count) and the viewer's
     // active set REGARDLESS of consent (these are reads, not modifications). Done BEFORE
